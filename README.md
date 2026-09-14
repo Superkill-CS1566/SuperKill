@@ -29,9 +29,11 @@ DESCRIPTIONHERE
 
 ## Midterm Goals
 
-* GOAL1HERE
-* GOAL2HERE
-...
+* Successfully implement the player movement and basic mechanics to a playable level: 3 different attacks, weapon throwing/pickup, and horizontal/vertical movement.
+* Have a basic map and screen system completed. Should be playable (pre-procedural gen). 1 static starting screen + end screens.
+* Be able to have two players connect to a server and move around.
+* Have some basic plan and direction for how online multiplayer and procedural generation is going to be implemented in the game. Start work on both. 
+
 
 ## Final Goals
 
