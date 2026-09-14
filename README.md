@@ -15,7 +15,10 @@ by Team 1
 
 ## Game Description
 
-DESCRIPTIONHERE
+Niddhogg-inspired two-player sidescroller.
+
+Both players start off on opposite ends of the screen, and their goal is to try to get to the opposite end by any means possible. This can be done by either defeating the opposing player or dodging and running past them. As long as either player is able to reach the end of the screen, both players are teleported to the next screen. For each player, the end goal is to reach the end screen, and both of their end screens are on opposite sides of the map.
+
 
 ## Advanced Topic Description
 
