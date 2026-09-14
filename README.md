@@ -1,13 +1,17 @@
-# GAMENAMEHERE
+# SuperKill
 
-by TEAMNAMEHERE
+by Team 1
 
 ## Team Members
-* Advanced Topic Subteam 1: TOPICHERE
-	* STUDENT1_USERNAME_HERE: STUDENT1_FULLNAME_HERE
+* Advanced Topic Subteam 1: NETWORKING
+	* ericliu2006: Eric Liu
+ 	* leun-se: Brian Lee
+  	* hmyld: Mengzi Chen
 
-* Advanced Topic Subteam 2: TOPICHERE
-	* STUDENT1_USERNAME_HERE: STUDENT1_FULLNAME_HERE
+* Advanced Topic Subteam 2: PROCEDURAL GENERATION
+	* raa193: Ryan Armendariz-Lopez
+ 	* abstractGuardian27: Astor Stave
+  	* STUDENT1_USERNAME_HERE: Noah
 
 ## Game Description
 
