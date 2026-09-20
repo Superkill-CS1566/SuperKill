@@ -6,6 +6,7 @@ pub enum AppState {
     #[default]
     MainMenu,  //主菜单
     Credits,  //鸣谢
+    Settings, //设置
     // can create a separate game state for actual game
 }
 

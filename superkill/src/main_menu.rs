@@ -18,6 +18,15 @@ impl Plugin for MainMenuPlugin {
 #[derive(Component)]
 struct MainMenuRoot;
 
+#[derive(Component)]
+struct CreditsButton;
+
+#[derive(Component)]
+struct SettingsButton;
+
+#[derive(Component)]
+struct ExitButton;
+
 // Removed camera spawning from fn, moved to separate fn in common.rs
 fn spawn_main_menu(mut commands: Commands) {
     // if print 1 it is ok
@@ -28,50 +37,112 @@ fn spawn_main_menu(mut commands: Commands) {
         Node {
             width: Val::Percent(100.0),
             height: Val::Percent(100.0),
-            align_items: AlignItems::Center,
-            justify_content: JustifyContent::Center,
+            align_items: AlignItems::End,
+            justify_content: JustifyContent::Start,
             ..default()
         },
         BackgroundColor(Color::srgb(0.15, 0.15, 0.2)),
         MainMenuRoot,
     ))
     .with_children(|parent| {
-        parent.spawn((
-            // button position
-            Button,
-            Node {
-                width: Val::Px(300.0),
-                height: Val::Px(90.0),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                border: UiRect::all(Val::Px(2.0)),
+        parent
+            .spawn(Node {
+                flex_direction: FlexDirection::Row,
+                column_gap: Val::Px(16.0),
+                margin: UiRect::all(Val::Px(40.0)),
                 ..default()
-            },
-            BackgroundColor(Color::srgb(0.3, 0.5, 0.95)),
-            BorderColor::all(Color::srgb(0.5, 0.7, 1.0)),
-        ))
-        .with_children(|parent| {
-            // button word
-            parent.spawn((
-                Text::new("Credits"),
-                TextFont {
-                    font_size: FontSize::Px(36.0),
-                    ..default()
-                },
-                TextColor(Color::WHITE),
-            ));
-        });
+            })
+            .with_children(|row| {
+                row.spawn((
+                    Button,
+                    CreditsButton,
+                    menu_button_node(),
+                    BackgroundColor(Color::srgb(0.3, 0.5, 0.95)),
+                    BorderColor::all(Color::srgb(0.5, 0.7, 1.0)),
+                ))
+                .with_children(|p| {
+                    p.spawn((
+                        Text::new("Credits"),
+                        TextFont {
+                            font_size: FontSize::Px(28.0),
+                            ..default()
+                        },
+                        TextColor(Color::WHITE),
+                    ));
+                });
+
+                row.spawn((
+                    Button,
+                    SettingsButton,
+                    menu_button_node(),
+                    BackgroundColor(Color::srgb(0.25, 0.25, 0.3)),
+                    BorderColor::all(Color::srgb(0.5, 0.5, 0.55)),
+                ))
+                .with_children(|p| {
+                    p.spawn((
+                        Text::new("Settings"),
+                        TextFont {
+                            font_size: FontSize::Px(28.0),
+                            ..default()
+                        },
+                        TextColor(Color::WHITE),
+                    ));
+                });
+
+                row.spawn((
+                    Button,
+                    ExitButton,
+                    menu_button_node(),
+                    BackgroundColor(Color::srgb(0.7, 0.2, 0.2)),
+                    BorderColor::all(Color::srgb(0.9, 0.4, 0.4)),
+                ))
+                .with_children(|p| {
+                    p.spawn((
+                        Text::new("Exit"),
+                        TextFont {
+                            font_size: FontSize::Px(28.0),
+                            ..default()
+                        },
+                        TextColor(Color::WHITE),
+                    ));
+                });
+            });
     });
+}
+
+// 统一的按钮尺寸
+fn menu_button_node() -> Node {
+    Node {
+        width: Val::Px(220.0),
+        height: Val::Px(80.0),
+        align_items: AlignItems::Center,
+        justify_content: JustifyContent::Center,
+        border: UiRect::all(Val::Px(2.0)),
+        ..default()
+    }
 }
 
 // handle interact with bottons
 fn button_interaction(
-    mut interaction_query: Query<&Interaction, (Changed<Interaction>, With<Button>)>,
+    mut credits_q: Query<&Interaction, (Changed<Interaction>, With<CreditsButton>)>,
+    mut settings_q: Query<&Interaction, (Changed<Interaction>, With<SettingsButton>)>,
+    mut exit_q: Query<&Interaction, (Changed<Interaction>, With<ExitButton>)>,
     mut next_state: ResMut<NextState<AppState>>,
+    mut exit: MessageWriter<AppExit>,
 ) {
-    for interaction in &mut interaction_query {
+    for interaction in &mut credits_q {
         if let Interaction::Pressed = *interaction {
             next_state.set(AppState::Credits);
+        }
+    }
+    for interaction in &mut settings_q {
+        if let Interaction::Pressed = *interaction {
+            next_state.set(AppState::Settings);
+        }
+    }
+    for interaction in &mut exit_q {
+        if let Interaction::Pressed = *interaction {
+            exit.write(AppExit::Success);
         }
     }
 }
