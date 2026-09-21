@@ -49,7 +49,6 @@ Levels are built from preset assets (NPCs, weapons, obstacles). There are a few 
     * Outside levels will treat the maze like an implied path in which platforms/barriers will stand in as maze walls, while bar levels will simply treat the maze as the structure of the building. 
 * The final auto-scrolling level will use procedural terrain generation for construction (via Perlin Noise).
     * Terrain generation must include pits and cliffs to provide extra challenges for players.
-    * We are looking to use the noise crate in order to implement this portion of the game: https://docs.rs/noise/latest/noise/
 * After the level generation has completed, the game will then place any designated objects throughout the level.
 	* Levels will have a list of objects which it must place in a given level (i.e. Level 2 has 2 weapons, 1 NPC, 1 Obstacle)
 	* Randomized generation for world objects which will account for entity collision and NPC paths. In the case in which objects collide or NPC paths are impeded, generation will continue.
