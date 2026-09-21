@@ -45,7 +45,7 @@ The game will use a client-server architecture over UDP, with the server acting 
 
 Levels are built from preset assets (NPCs, weapons, obstacles). There are a few different in-between screen types. Random generation should still let players reach either end, and objects should not spawn in bad spots.
 
-* A DFS-based maze generation algorithm will be used to construct most standard bar/outside levels of the game. 
+* A Recursive Divsion maze generation algorithm will be used to construct most standard bar/outside levels of the game. 
     * Outside levels will treat the maze like an implied path in which platforms/barriers will stand in as maze walls, while bar levels will simply treat the maze as the structure of the building. 
 * The final auto-scrolling level will use procedural terrain generation for construction (via Perlin Noise).
     * Terrain generation must include pits and cliffs to provide extra challenges for players.
