@@ -28,7 +28,18 @@ Both players start off on opposite ends of the screen, and their goal is to try 
 
 ### Networking
 
-Use a client-server setup. The server keeps the game state (player/weapon position, health, attacks, blocking). Players send actions to the server, and the server sends the updated state back to both players. When someone reaches the other end of the screen, the server moves both players to the next screen.
+The game will use a client-server architecture over UDP, with the server acting as the authoritative source of truth for gameplay. 
+
+* Tokio + UDP will be used to handle communication between the server and two Bevy clients. 
+	* Clients will connect to the server, receive player IDs, and send player inputs such as movement, attacks, blocking, and jumping. 
+	* Serde and Postcard will be used to serialize game messages into compact packets that can be sent over UDP. 
+* The server will control the official game state. 
+	* Player position, velocity, health, attacks, blocking, deaths, respawns, screen transitions, and win conditions will all be processed by the server. 
+	* Clients will send inputs rather than directly telling the server their positions or combat results. 
+* Once basic multiplayer is working, latency compensation techniques will be added. 
+	* Client-side prediction will make the local player's movement feel responsive. 
+	* Interpolation will smooth the movement of the remote player between server updates. 
+	* Server-side rewind will use recent player and hitbox history to compensate for latency when determining attacks, blocks, and parries.
 
 ### Procedural Generation
 
@@ -46,17 +57,45 @@ Levels are built from preset assets (NPCs, weapons, obstacles). There are a few 
 
 ## Midterm Goals
 
-* Successfully implement the player movement and basic mechanics to a playable level: 3 different attacks, weapon throwing/pickup, and horizontal/vertical movement.
-* Have a basic map and screen system completed. Should be playable (pre-procedural gen). 1 static starting screen + end screens.
-* Be able to have two players connect to a server and move around.
-* Have some basic plan and direction for how online multiplayer and procedural generation is going to be implemented in the game. Start work on both. 
+* Successfully implement the core player mechanics to a playable level. 
+	* Horizontal/vertical movement. 
+	* At least 3 different attacks. 
+	* Blocking and basic combat interactions. 
+	* Weapon throwing and pickup. 
+
+* Have the basic map and screen progression system working. 
+	* One static starting screen. 
+	* End screens for both players. 
+	* Players can move between screens without procedural generation. 
+
+* Complete the foundation of the multiplayer system. 
+	* Run a Tokio UDP server. 
+	* Allow two Bevy clients to connect and receive separate player IDs. 
+	* Send structured messages using Serde and Postcard. 
+	* Synchronize basic player movement so each client can see the other player moving. 
+
+* Begin implementation of both advanced topics. 
+	* Networking should have the client-server architecture established and basic synchronization working. 
+	* Procedural generation should have the level-generation algorithms designed and initial generation tests underway.
 
 
 ## Final Goals
 
 * 40%: Online multiplayer works in a real match (move, fight, and go to the next screen together).
+	* Two players can connect and play through a full match. 
+	* The server is authoritative over movement, combat, health, deaths, respawns, and screen progression. 
+	* Attacks, blocking, weapon interactions, and player state remain synchronized between both clients. 
+	* Implement client-side prediction and interpolation to improve multiplayer responsiveness. 
+	* Implement server-side rewind for latency compensation during attacks and parries.
+
 * 35%: Procedural generation for in-between screens.
+	* Generate playable in-between screens using the DFS-based maze generation system. 
+	* Procedurally place obstacles, weapons, NPCs, and other level objects without blocking required player paths. 
+	* Ensure generated levels remain traversable in both directions.
+
 * 25%: The game is playable from start to end with no major issues.
+	* Players can start a match, fight through multiple screens, and reach their respective final end screens. 
+	* Core mechanics, multiplayer, screen progression, and procedural generation work together without major gameplay-breaking issues.
 
 ## Stretch Goals
 
