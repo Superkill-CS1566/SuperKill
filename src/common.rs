@@ -8,6 +8,8 @@ pub enum AppState {
     Credits,  //鸣谢
     Settings, //设置
     InGame,   //游戏
+    Loading, 
+    Testing,
 }
 
 // camera

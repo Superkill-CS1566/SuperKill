@@ -30,6 +30,9 @@ struct ExitButton;
 #[derive(Component)]
 struct PlayButton;
 
+#[derive(Component)]
+struct TestButton;
+
 // Removed camera spawning from fn, moved to separate fn in common.rs
 fn spawn_main_menu(mut commands: Commands) {
     // if print 1 it is ok
@@ -39,6 +42,7 @@ fn spawn_main_menu(mut commands: Commands) {
         Node {
             width: Val::Percent(100.0),
             height: Val::Percent(100.0),
+            flex_wrap: FlexWrap::Wrap,
             flex_direction: FlexDirection::Column,
             align_items: AlignItems::Default,
             ..default()
@@ -71,6 +75,33 @@ fn spawn_main_menu(mut commands: Commands) {
             .with_children(|p| {
                 p.spawn((
                     Text::new("Play Game"),
+                    TextFont {
+                        font_size: FontSize::Px(36.0),
+                        ..default()
+                    },
+                    TextColor(Color::WHITE),
+                ));
+            });
+        
+        parent
+            .spawn((
+                Button,
+                TestButton,
+                Node {
+                    width: Val::Px(280.0),
+                    height: Val::Px(90.0),
+                    align_self: AlignSelf::Center,
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::Center,
+                    border: UiRect::all(Val::Px(3.0)),
+                    ..default()
+                },
+                BackgroundColor(Color::srgb(0.2, 0.7, 0.3)),
+                BorderColor::all(Color::srgb(0.4, 0.9, 0.5)),
+            ))
+            .with_children(|p| {
+                p.spawn((
+                    Text::new("Test Game"),
                     TextFont {
                         font_size: FontSize::Px(36.0),
                         ..default()
@@ -164,6 +195,7 @@ fn menu_button_node() -> Node {
 // handle interact with bottons
 fn button_interaction(
     mut play_q: Query<&Interaction, (Changed<Interaction>, With<PlayButton>)>,
+    mut test_q: Query<&Interaction, (Changed<Interaction>, With<TestButton>)>,
     mut credits_q: Query<&Interaction, (Changed<Interaction>, With<CreditsButton>)>,
     mut settings_q: Query<&Interaction, (Changed<Interaction>, With<SettingsButton>)>,
     mut exit_q: Query<&Interaction, (Changed<Interaction>, With<ExitButton>)>,
@@ -172,7 +204,12 @@ fn button_interaction(
 ) {
     for interaction in &mut play_q {
         if let Interaction::Pressed = *interaction {
-            next_state.set(AppState::InGame);
+            next_state.set(AppState::Loading);
+        }
+    }
+    for interaction in &mut test_q {
+        if let Interaction::Pressed = *interaction {
+            next_state.set(AppState::Testing);
         }
     }
     for interaction in &mut credits_q {
