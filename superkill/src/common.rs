@@ -7,6 +7,9 @@ pub enum AppState {
     MainMenu,  //主菜单
     Credits,  //鸣谢
     Settings, //设置
+    Play, // main game state
+    Loading, // in between state from menu to game
+    Test, // test state for procedural gen
     // can create a separate game state for actual game
 }
 
@@ -28,5 +31,12 @@ pub fn spawn_ui_camera(mut commands: Commands) {
 pub fn despawn_ui_camera(mut commands: Commands, cameras: Query<Entity, With<UiCamera>>) {
     for entity in &cameras {
         commands.entity(entity).despawn();
+    }
+}
+
+// Helper to return to menu
+pub fn back_to_menu(keys: Res<ButtonInput<KeyCode>>, mut next_state: ResMut<NextState<AppState>>) {
+    if keys.just_pressed(KeyCode::Escape) {
+        next_state.set(AppState::MainMenu);
     }
 }

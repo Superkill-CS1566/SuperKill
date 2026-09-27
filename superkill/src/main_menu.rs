@@ -19,6 +19,12 @@ impl Plugin for MainMenuPlugin {
 struct MainMenuRoot;
 
 #[derive(Component)]
+struct PlayButton;
+
+#[derive(Component)]
+struct TestButton;
+
+#[derive(Component)]
 struct CreditsButton;
 
 #[derive(Component)]
@@ -26,6 +32,7 @@ struct SettingsButton;
 
 #[derive(Component)]
 struct ExitButton;
+
 
 // Removed camera spawning from fn, moved to separate fn in common.rs
 fn spawn_main_menu(mut commands: Commands) {
@@ -48,11 +55,49 @@ fn spawn_main_menu(mut commands: Commands) {
         parent
             .spawn(Node {
                 flex_direction: FlexDirection::Row,
+                flex_wrap: FlexWrap::Wrap,  // added wraparound for buttons
                 column_gap: Val::Px(16.0),
+                row_gap: Val::Px(16.0),
                 margin: UiRect::all(Val::Px(40.0)),
                 ..default()
             })
             .with_children(|row| {
+                row.spawn((
+                    Button,
+                    PlayButton,
+                    menu_button_node(),
+                    BackgroundColor(Color::srgb(0.25, 0.65, 0.4)),
+                    BorderColor::all(Color::srgb(0.45, 0.85, 0.6)),
+                ))
+                .with_children(|p| {
+                    p.spawn((
+                        Text::new("Play"),
+                        TextFont {
+                            font_size: FontSize::Px(28.0),
+                            ..default()
+                        },
+                        TextColor(Color::WHITE),
+                    ));
+                });
+
+                row.spawn((
+                    Button,
+                    TestButton,
+                    menu_button_node(),
+                    BackgroundColor(Color::srgb(0.45, 0.35, 0.6)),
+                    BorderColor::all(Color::srgb(0.65, 0.55, 0.8)),
+                ))
+                .with_children(|p| {
+                    p.spawn((
+                        Text::new("Test"),
+                        TextFont {
+                            font_size: FontSize::Px(28.0),
+                            ..default()
+                        },
+                        TextColor(Color::WHITE),
+                    ));
+                });
+
                 row.spawn((
                     Button,
                     CreditsButton,
@@ -124,12 +169,24 @@ fn menu_button_node() -> Node {
 
 // handle interact with bottons
 fn button_interaction(
+    mut play_q: Query<&Interaction, (Changed<Interaction>, With<PlayButton>)>,
+    mut test_q: Query<&Interaction, (Changed<Interaction>, With<TestButton>)>,
     mut credits_q: Query<&Interaction, (Changed<Interaction>, With<CreditsButton>)>,
     mut settings_q: Query<&Interaction, (Changed<Interaction>, With<SettingsButton>)>,
     mut exit_q: Query<&Interaction, (Changed<Interaction>, With<ExitButton>)>,
     mut next_state: ResMut<NextState<AppState>>,
     mut exit: MessageWriter<AppExit>,
 ) {
+    for interaction in &mut play_q {
+        if let Interaction::Pressed = *interaction {
+            next_state.set(AppState::Loading); // Clicking on Play button switches to loading state first
+        }
+    }
+    for interaction in &mut test_q {
+        if let Interaction::Pressed = *interaction {
+            next_state.set(AppState::Test);
+        }
+    }
     for interaction in &mut credits_q {
         if let Interaction::Pressed = *interaction {
             next_state.set(AppState::Credits);

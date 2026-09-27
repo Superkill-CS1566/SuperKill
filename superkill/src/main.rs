@@ -2,10 +2,12 @@ mod common;
 mod credits;
 mod main_menu;
 mod settings;
-
+mod loading;
+mod play;
+mod test;
 use bevy::{prelude::*, window::{EnabledButtons, PresentMode}};
 
-use crate::{common::AppState, credits::CreditsPlugin, main_menu::MainMenuPlugin, settings::SettingsPlugin};
+use crate::{common::AppState, credits::CreditsPlugin, main_menu::MainMenuPlugin, settings::SettingsPlugin, loading::LoadingPlugin, play::PlayPlugin, test::TestPlugin};
 
 
 fn main() {
@@ -25,6 +27,6 @@ fn main() {
         }))
         .init_state::<AppState>()
         // changed this to just add the plugins
-        .add_plugins((MainMenuPlugin, CreditsPlugin, SettingsPlugin))
+        .add_plugins((MainMenuPlugin, CreditsPlugin, SettingsPlugin, LoadingPlugin, PlayPlugin, TestPlugin))
         .run();
 }
