@@ -10,6 +10,7 @@ pub enum AppState {
     InGame,   //游戏
     Loading, 
     Testing,
+    MazeTesting,
 }
 
 // camera
