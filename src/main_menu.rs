@@ -33,6 +33,9 @@ struct PlayButton;
 #[derive(Component)]
 struct TestButton;
 
+#[derive(Component)]
+struct MazeTestButton;
+
 // Removed camera spawning from fn, moved to separate fn in common.rs
 fn spawn_main_menu(mut commands: Commands) {
     // if print 1 it is ok
@@ -104,6 +107,33 @@ fn spawn_main_menu(mut commands: Commands) {
                     Text::new("Test Game"),
                     TextFont {
                         font_size: FontSize::Px(36.0),
+                        ..default()
+                    },
+                    TextColor(Color::WHITE),
+                ));
+            });
+
+        parent
+            .spawn((
+                Button,
+                MazeTestButton,
+                Node {
+                    width: Val::Px(280.0),
+                    height: Val::Px(70.0),
+                    align_self: AlignSelf::Center,
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::Center,
+                    border: UiRect::all(Val::Px(3.0)),
+                    ..default()
+                },
+                BackgroundColor(Color::srgb(0.2, 0.45, 0.75)),
+                BorderColor::all(Color::srgb(0.4, 0.7, 0.95)),
+            ))
+            .with_children(|p| {
+                p.spawn((
+                    Text::new("Maze Test"),
+                    TextFont {
+                        font_size: FontSize::Px(30.0),
                         ..default()
                     },
                     TextColor(Color::WHITE),
@@ -196,6 +226,7 @@ fn menu_button_node() -> Node {
 fn button_interaction(
     mut play_q: Query<&Interaction, (Changed<Interaction>, With<PlayButton>)>,
     mut test_q: Query<&Interaction, (Changed<Interaction>, With<TestButton>)>,
+    mut maze_test_q: Query<&Interaction, (Changed<Interaction>, With<MazeTestButton>)>,
     mut credits_q: Query<&Interaction, (Changed<Interaction>, With<CreditsButton>)>,
     mut settings_q: Query<&Interaction, (Changed<Interaction>, With<SettingsButton>)>,
     mut exit_q: Query<&Interaction, (Changed<Interaction>, With<ExitButton>)>,
@@ -210,6 +241,11 @@ fn button_interaction(
     for interaction in &mut test_q {
         if let Interaction::Pressed = *interaction {
             next_state.set(AppState::Testing);
+        }
+    }
+    for interaction in &mut maze_test_q {
+        if let Interaction::Pressed = *interaction {
+            next_state.set(AppState::MazeTesting);
         }
     }
     for interaction in &mut credits_q {
