@@ -7,6 +7,7 @@ mod procedural_test;
 mod settings;
 mod test;
 mod loading;
+mod perlin_noise;
 
 use bevy::{prelude::*, window::{EnabledButtons, PresentMode}};
 
