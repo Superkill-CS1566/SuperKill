@@ -5,6 +5,8 @@ fn hash(i: i32, seed: u32) -> u32 {
     h ^= i as u32;
     h = h.wrapping_mul(0x45d9f3b);
     h ^= h >> 16;
+    h = h.wrapping_mul(0x45d9f3b);
+    h ^= h >> 16;
 
     h
 }
@@ -26,30 +28,23 @@ fn lerp(a: f32, b: f32, t: f32) -> f32 {
     return (1.0 - t) * a + (t * b);
 }
 
-// retrieve values of points with two integers (currently locked to i and i+1)
-pub fn inter(i: i32, seed: u32) -> Vec<f32> {
-    
-    // calculate the gradients of endpoints
-    let gradient_i = gradient_at_point(i, seed);
-    let gradient_j = gradient_at_point(i + 1, seed);
+// retrieve noise value at a specific point
+pub fn noise(x: f32, seed: u32) -> f32 {
+    // calculate upper and lower integer values
+    let lower = x.floor() as i32;
+    let upper = lower + 1;
 
-    let mut inter_points: Vec<f32> = Vec::new();
+    let gradient_i = gradient_at_point(lower, seed);
+    let gradient_j = gradient_at_point(upper, seed);
 
-    for j in 0..10 {
-        // get point value
-        let t = (j as f32) / 10.0;
-        let point = (i as f32) + t;
-        
-        // weight each gradient to point
-        let weight_i = gradient_i * (point - (i as f32));
-        let weight_j = gradient_j * (point - ((i + 1) as f32));
+    // run smootherstep on our position
+    let t = x - lower as f32;
+    let fade = smootherstep(t);
 
-        // retrieve a faded point value based on the smootherstep function
-        let fade = smootherstep(t);
+    // get the weight of each integer gradient on our position
+    let weight_i = gradient_i * (x - lower as f32);
+    let weight_j = gradient_j * (x - upper as f32);
 
-        // push the gradient for point onto our vec
-        inter_points.push(lerp(weight_i, weight_j, fade));
-    }
-
-    inter_points
+    // use linear interpolation to get our result
+    lerp(weight_i, weight_j, fade)
 }

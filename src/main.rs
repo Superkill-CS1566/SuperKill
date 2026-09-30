@@ -8,11 +8,13 @@ mod settings;
 mod test;
 mod loading;
 mod perlin_noise;
+mod perlin_noise_test;
 
 use bevy::{prelude::*, window::{EnabledButtons, PresentMode}};
 
-use crate::{common::AppState, credits::CreditsPlugin, game::GamePlugin, main_menu::MainMenuPlugin, settings::SettingsPlugin, test::TestPlugin, loading::LoadingPlugin};
+use crate::{common::AppState::{self}, credits::CreditsPlugin, game::GamePlugin, loading::LoadingPlugin, main_menu::MainMenuPlugin, settings::SettingsPlugin, test::TestPlugin};
 use crate::procedural_test::ProceduralTestPlugin;
+use crate::perlin_noise_test::PerlinNoiseTestPlugin;
 
 
 fn main() {
@@ -34,5 +36,6 @@ fn main() {
         // changed this to just add the plugins
         .add_plugins((MainMenuPlugin, CreditsPlugin, SettingsPlugin, GamePlugin, TestPlugin, LoadingPlugin))
         .add_plugins(ProceduralTestPlugin)
+        .add_plugins(PerlinNoiseTestPlugin)
         .run();
 }

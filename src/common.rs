@@ -11,6 +11,7 @@ pub enum AppState {
     Loading, 
     Testing,
     MazeTesting,
+    PNoiseTesting
 }
 
 // camera
