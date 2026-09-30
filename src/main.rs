@@ -9,12 +9,14 @@ mod test;
 mod loading;
 mod perlin_noise;
 mod perlin_noise_test;
+mod procedural_gen_menu;
 
 use bevy::{prelude::*, window::{EnabledButtons, PresentMode}};
 
 use crate::{common::AppState::{self}, credits::CreditsPlugin, game::GamePlugin, loading::LoadingPlugin, main_menu::MainMenuPlugin, settings::SettingsPlugin, test::TestPlugin};
 use crate::procedural_test::ProceduralTestPlugin;
 use crate::perlin_noise_test::PerlinNoiseTestPlugin;
+use crate::procedural_gen_menu::ProcGenPlugin;
 
 
 fn main() {
@@ -37,5 +39,6 @@ fn main() {
         .add_plugins((MainMenuPlugin, CreditsPlugin, SettingsPlugin, GamePlugin, TestPlugin, LoadingPlugin))
         .add_plugins(ProceduralTestPlugin)
         .add_plugins(PerlinNoiseTestPlugin)
+        .add_plugins(ProcGenPlugin)
         .run();
 }
