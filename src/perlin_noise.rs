@@ -20,12 +20,12 @@ fn gradient_at_point(i: i32, seed: u32) -> f32 {
 
 // implementation of smootherstep based on Wikipedia article
 fn smootherstep(i: f32) -> f32 {
-    return (i * i * i * ( i * (6.0 * i - 15.0) + 10.0)).clamp(0.0, 1.0);
+    i * i * i * ( i * (6.0 * i - 15.0) + 10.0).clamp(0.0, 1.0)
 }
 
 // implemenation of linear interpolation based on Wikipedia article
 fn lerp(a: f32, b: f32, t: f32) -> f32 {
-    return (1.0 - t) * a + (t * b);
+    (1.0 - t) * a + (t * b)
 }
 
 // retrieve noise value at a specific point
