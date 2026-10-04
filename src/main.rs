@@ -1,7 +1,10 @@
+mod camera;
+mod combat;
 mod common;
 mod credits;
 mod game;
 mod main_menu;
+mod player;
 mod procedural_generation;
 mod procedural_test;
 mod settings;
@@ -14,6 +17,9 @@ mod procedural_gen_menu;
 use bevy::{prelude::*, window::{EnabledButtons, PresentMode}};
 
 use crate::{common::AppState::{self}, credits::CreditsPlugin, game::GamePlugin, loading::LoadingPlugin, main_menu::MainMenuPlugin, settings::SettingsPlugin, test::TestPlugin};
+use crate::camera::CameraPlugin;
+use crate::combat::CombatPlugin;
+use crate::player::PlayerPlugin;
 use crate::procedural_test::ProceduralTestPlugin;
 use crate::perlin_noise_test::PerlinNoiseTestPlugin;
 use crate::procedural_gen_menu::ProcGenPlugin;
@@ -36,7 +42,9 @@ fn main() {
         }))
         .init_state::<AppState>()
         // changed this to just add the plugins
-        .add_plugins((MainMenuPlugin, CreditsPlugin, SettingsPlugin, GamePlugin, TestPlugin, LoadingPlugin))
+        .add_plugins((MainMenuPlugin, CreditsPlugin, SettingsPlugin, TestPlugin, LoadingPlugin))
+        // in-game: level + fighters + camera + combat
+        .add_plugins((GamePlugin, PlayerPlugin, CameraPlugin, CombatPlugin))
         .add_plugins(ProceduralTestPlugin)
         .add_plugins(PerlinNoiseTestPlugin)
         .add_plugins(ProcGenPlugin)

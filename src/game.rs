@@ -1,7 +1,9 @@
 use bevy::prelude::*;
 
-use crate::common::{despawn_ui_camera, spawn_ui_camera, UiCamera, AppState, LEVEL_LEN, WIN_W, WIN_H};
+use crate::common::{AppState, Platform, GROUND_THICKNESS, GROUND_Y, LEVEL_LEN};
+use crate::combat::{Dead, Priority};
 use crate::loading::{LoadingAssets, despawn_with};
+use crate::player::{move_and_collide, Player, PlayerSide};
 
 pub struct GamePlugin;
 
@@ -9,40 +11,21 @@ impl Plugin for GamePlugin {
     fn build(&self, app: &mut App) {
         app.init_state::<GameState>()
             .add_systems(Startup, load_level)
-            .add_systems(OnEnter(AppState::InGame), 
-                ((spawn_ui_camera, init_camera_zoom).chain(), setup_game, setup_level),
-            )
+            .add_systems(OnEnter(AppState::InGame), (setup_game, setup_level))
             .add_systems(
                 Update,
                 (
-                    player_movement
-                        .run_if(in_state(AppState::InGame))
-                        .run_if(in_state(GameState::Playing))
-                        .before(apply_gravity),
-                    apply_gravity
-                        .run_if(in_state(AppState::InGame))
-                        .run_if(in_state(GameState::Playing))
-                        .before(move_and_collide),
-                    move_and_collide
-                        .run_if(in_state(AppState::InGame))
-                        .run_if(in_state(GameState::Playing))
-                        .before(update_player_visual),
                     screen_transition
                         .run_if(in_state(AppState::InGame))
                         .run_if(in_state(GameState::Playing))
                         .after(move_and_collide),
-                    camera_follow
-                        .run_if(in_state(AppState::InGame))
-                        .run_if(in_state(GameState::Playing))
-                        .after(screen_transition),
-                    update_player_visual.run_if(in_state(AppState::InGame)),
                     toggle_pause.run_if(in_state(AppState::InGame)),
                     pause_menu_interaction
                         .run_if(in_state(AppState::InGame))
                         .run_if(in_state(GameState::Paused)),
                 ),
             )
-            .add_systems(OnExit(AppState::InGame), (despawn_game, despawn_with::<Background>, despawn_ui_camera));
+            .add_systems(OnExit(AppState::InGame), (despawn_game, despawn_with::<Background>));
     }
 }
 
@@ -51,26 +34,6 @@ pub enum GameState {
     #[default]
     Playing,
     Paused,
-}
-
-// 玩家组件
-#[derive(Component)]
-struct Player {
-    speed: f32,
-    jump_force: f32,
-    is_grounded: bool,
-    is_crouching: bool,
-    prev_crouching: bool,
-    velocity: Vec2,
-    width: f32,
-    height: f32,
-    crouch_height: f32,
-}
-
-#[derive(Component)]
-struct Platform {
-    width: f32,
-    height: f32,
 }
 
 #[derive(Component)]
@@ -83,22 +46,22 @@ enum PauseButton {
 }
 
 #[derive(Component)]
-struct Background;
+pub struct Background;
 
 #[derive(Resource)]
 pub struct Backgrounds(Vec<Handle<Image>>);
 
 #[derive(Resource)]
-struct CurrentScreen(usize);
+pub struct CurrentScreen(usize);
 
 
-const GRAVITY: f32 = 1800.0;
 // replaced world height/width withh WIN_H and WIN_W in common
+// GRAVITY and the player constants now live in player.rs
+// ZOOM / SCREEN_W and the camera systems now live in camera.rs
+// GROUND_Y / GROUND_THICKNESS / Platform now live in common.rs
 
-// Camera and Background
-const ZOOM: f32 = 0.80;      // 0.5 = 2× zoomed in
+// Background
 const BG_OFFSET_Y: f32 = 65.0;
-const SCREEN_W: f32 = WIN_W * ZOOM; 
 const SCREEN_INSET: f32 = 20.0;
 const START_SCREEN: usize = 1;
 const BG_PATHS: &[&str] = &[
@@ -106,16 +69,6 @@ const BG_PATHS: &[&str] = &[
     "RainyNeonTokyoAlley.png",
     "lawn_forest_mountains.png",
 ];
-
-// Default Platform
-const GROUND_Y: f32 = -300.0;        // center of the ground platform
-const GROUND_THICKNESS: f32 = 60.0;
-
-// Player Constants
-const PLAYER_HEIGHT: f32 = 60.0;
-const PLAYER_SPAWN_X: f32 = 0.0;
-
-const PLAYER_SPAWN_Y: f32 = GROUND_Y + GROUND_THICKNESS / 2.0 + PLAYER_HEIGHT / 2.0;
 
 // add stuff for loading in foreground later for now just background 
 // might put it in separate file since its more a part of procedural gen
@@ -142,48 +95,50 @@ fn setup_level(mut commands: Commands, backgrounds: Res<Backgrounds>) {
     ));
 }
 
-fn screen_transition(
+// only the fighter holding priority may cross, and only toward their own goal
+pub fn screen_transition(
     mut current: ResMut<CurrentScreen>,
     backgrounds: Res<Backgrounds>,
-    mut player_q: Query<(&mut Player, &mut Transform)>,
+    priority: Res<Priority>,
+    mut players: Query<(&mut Player, &mut Transform, &PlayerSide), Without<Dead>>,
     mut bg_q: Query<&mut Sprite, With<Background>>,
 ) {
-    let Ok((mut player, mut transform)) = player_q.single_mut() else { return; };
-    let Ok(mut sprite) = bg_q.single_mut() else { return; };
+    // neutral — nobody advances
+    let Some(holder) = priority.0 else { return; };
 
+    let dir = holder.advance_dir();
     // edge of the background image, not the edge of the view
-    let edge = LEVEL_LEN / 2.0 - player.width / 2.0;
-    let x = transform.translation.x;
+    let edge = LEVEL_LEN / 2.0;
 
-    if x >= edge && current.0 + 1 < backgrounds.0.len() {
-        current.0 += 1;
-        transform.translation.x = -edge + SCREEN_INSET;
-    } else if x <= -edge && current.0 > 0 {
-        current.0 -= 1;
-        transform.translation.x = edge - SCREEN_INSET;
-    } else {
+    let at_edge = players.iter().any(|(p, t, s)| {
+        *s == holder && t.translation.x * dir >= edge - p.width / 2.0 - 1.0
+    });
+    if !at_edge {
         return;
     }
 
-    sprite.image = backgrounds.0[current.0].clone();
-    player.velocity.x = 0.0;
-}
+    let next = if dir > 0.0 {
+        if current.0 + 1 >= backgrounds.0.len() {
+            return; // outermost screen, no further
+        }
+        current.0 + 1
+    } else {
+        if current.0 == 0 {
+            return;
+        }
+        current.0 - 1
+    };
+    current.0 = next;
 
-// camera pans across the current background, stopping at its edges
-fn camera_follow(
-    player: Single<&Transform, With<Player>>,
-    mut camera: Single<&mut Transform, (With<UiCamera>, Without<Player>)>,
-) {
-    let half_view = SCREEN_W / 2.0;
-    camera.translation.x = player.translation.x.clamp(
-        -LEVEL_LEN / 2.0 + half_view,
-        LEVEL_LEN / 2.0 - half_view,
-    );
-}
+    // leader enters from behind; the other fighter appears ahead of them
+    for (mut player, mut transform, side) in &mut players {
+        let sign = if *side == holder { -1.0 } else { 1.0 };
+        transform.translation.x = sign * (edge - SCREEN_INSET) * dir;
+        player.velocity.x = 0.0;
+    }
 
-fn init_camera_zoom(mut camera: Single<&mut Projection, With<UiCamera>>) {
-    if let Projection::Orthographic(ref mut ortho) = **camera {
-        ortho.scale = ZOOM;
+    if let Ok(mut sprite) = bg_q.single_mut() {
+        sprite.image = backgrounds.0[current.0].clone();
     }
 }
 
@@ -202,30 +157,6 @@ fn setup_game(mut commands: Commands, mut next_game_state: ResMut<NextState<Game
     next_game_state.set(GameState::Playing);
 
     spawn_platform(&mut commands, 0.0, GROUND_Y, LEVEL_LEN, GROUND_THICKNESS, Color::srgb(0.25, 0.25, 0.3));
-
-    commands.spawn((
-        Sprite {
-            color: Color::srgb(0.2, 0.75, 0.35),
-            custom_size: Some(Vec2::new(40.0, PLAYER_HEIGHT)),
-            ..default()
-        },
-        Transform {
-            translation: Vec3::new(PLAYER_SPAWN_X, PLAYER_SPAWN_Y, 1.0),
-            ..default()
-        },
-        GlobalTransform::default(),
-        Player {
-            speed: 320.0,
-            jump_force: 620.0,
-            is_grounded: false,
-            is_crouching: false,
-            prev_crouching: false,
-            velocity: Vec2::ZERO,
-            width: 40.0,
-            height: 60.0,
-            crouch_height: 35.0,
-        },
-    ));
 }
 
 fn spawn_platform(
@@ -249,156 +180,6 @@ fn spawn_platform(
         GlobalTransform::default(),
         Platform { width, height },
     ));
-}
-
-fn player_movement(
-    keyboard: Res<ButtonInput<KeyCode>>,
-    mut query: Query<(&mut Player, &mut Transform)>,
-) {
-    for (mut player, mut transform) in &mut query {
-        let now_crouching =
-            keyboard.pressed(KeyCode::KeyS) || keyboard.pressed(KeyCode::ArrowDown);
-
-        if player.is_grounded {
-            let half_delta = (player.height - player.crouch_height) / 2.0;
-            if player.prev_crouching && !now_crouching {
-
-                transform.translation.y += half_delta;
-            } else if !player.prev_crouching && now_crouching {
-
-                transform.translation.y -= half_delta;
-            }
-        }
-        player.prev_crouching = now_crouching;
-        player.is_crouching = now_crouching;
-
-
-        let mut move_dir = 0.0;
-        if keyboard.pressed(KeyCode::KeyA) || keyboard.pressed(KeyCode::ArrowLeft) {
-            move_dir -= 1.0;
-        }
-        if keyboard.pressed(KeyCode::KeyD) || keyboard.pressed(KeyCode::ArrowRight) {
-            move_dir += 1.0;
-        }
-
-        // 下蹲时移动速度减半
-        let speed = if player.is_crouching {
-            player.speed * 0.5
-        } else {
-            player.speed
-        };
-        player.velocity.x = move_dir * speed;
-
-        if (keyboard.just_pressed(KeyCode::KeyW)
-            || keyboard.just_pressed(KeyCode::ArrowUp)
-            || keyboard.just_pressed(KeyCode::Space))
-            && player.is_grounded
-            && !player.is_crouching
-        {
-            player.velocity.y = player.jump_force;
-            player.is_grounded = false;
-        }
-    }
-}
-
-fn apply_gravity(time: Res<Time>, mut query: Query<&mut Player>) {
-    for mut player in &mut query {
-        if !player.is_grounded {
-            player.velocity.y -= GRAVITY * time.delta().as_secs_f32();
-            // 终端速度限制
-            player.velocity.y = player.velocity.y.max(-1200.0);
-        }
-    }
-}
-
-fn move_and_collide(
-    time: Res<Time>,
-    mut player_query: Query<(&mut Player, &mut Transform)>,
-    platform_query: Query<(&Platform, &Transform), Without<Player>>,
-) {
-    let delta = time.delta().as_secs_f32();
-
-    for (mut player, mut transform) in &mut player_query {
-        let player_h = if player.is_crouching {
-            player.crouch_height
-        } else {
-            player.height
-        };
-        let half_w = player.width / 2.0;
-        let half_h = player_h / 2.0;
-
-        let mut new_x = transform.translation.x + player.velocity.x * delta;
-
-        new_x = new_x.clamp(-LEVEL_LEN / 2.0 + half_w, LEVEL_LEN / 2.0 - half_w);
-
-        for (platform, p_transform) in &platform_query {
-            let px = p_transform.translation.x;
-            let py = p_transform.translation.y;
-            let pw = platform.width / 2.0;
-            let ph = platform.height / 2.0;
-
-            let overlaps_x = (new_x - half_w) <= (px + pw) && (new_x + half_w) >= (px - pw);
-            let overlaps_y = (transform.translation.y - half_h) < (py + ph)
-                && (transform.translation.y + half_h) > (py - ph);
-
-            if overlaps_x && overlaps_y {
-                if transform.translation.x < px {
-                    new_x = px - pw - half_w; // 从左侧撞，推到平台左边
-                } else {
-                    new_x = px + pw + half_w; // 从右侧撞，推到平台右边
-                }
-                player.velocity.x = 0.0;
-            }
-        }
-        transform.translation.x = new_x;
-
-        let mut new_y = transform.translation.y + player.velocity.y * delta;
-        player.is_grounded = false;
-
-        for (platform, p_transform) in &platform_query {
-            let px = p_transform.translation.x;
-            let py = p_transform.translation.y;
-            let pw = platform.width / 2.0;
-            let ph = platform.height / 2.0;
-
-            let overlaps_x = (transform.translation.x - half_w) <= (px + pw)
-                && (transform.translation.x + half_w) >= (px - pw);
-            let overlaps_y =
-                (new_y - half_h) <= (py + ph) && (new_y + half_h) >= (py - ph);
-
-            if overlaps_x && overlaps_y {
-                if player.velocity.y <= 0.0 && transform.translation.y >= py {
-                    new_y = py + ph + half_h;
-                    player.velocity.y = 0.0;
-                    player.is_grounded = true;
-                } else if player.velocity.y > 0.0 && transform.translation.y < py {
-                    new_y = py - ph - half_h;
-                    player.velocity.y = 0.0;
-                }
-            }
-        }
-
-        // Respawn Logic
-        if new_y < -WIN_H / 2.0 - 100.0 {
-            new_y = PLAYER_SPAWN_Y;
-            transform.translation.x = PLAYER_SPAWN_X;
-            player.velocity = Vec2::ZERO;
-        }
-        transform.translation.y = new_y;
-    }
-}
-
-fn update_player_visual(mut query: Query<(&Player, &mut Sprite)>) {
-    for (player, mut sprite) in &mut query {
-        let target_h = if player.is_crouching {
-            player.crouch_height
-        } else {
-            player.height
-        };
-        if let Some(size) = &mut sprite.custom_size {
-            size.y = target_h;
-        }
-    }
 }
 
 fn toggle_pause(
@@ -532,7 +313,7 @@ fn pause_menu_interaction(
 
 fn despawn_game(
     mut commands: Commands,
-    query: Query<Entity, Or<(With<Player>, With<Platform>, With<PauseMenuRoot>)>>,
+    query: Query<Entity, Or<(With<Platform>, With<PauseMenuRoot>)>>,
     children: Query<&Children>,
 ) {
     for entity in &query {
