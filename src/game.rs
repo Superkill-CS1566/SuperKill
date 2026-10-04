@@ -1,13 +1,17 @@
 use bevy::prelude::*;
 
-use crate::common::{despawn_ui_camera, spawn_ui_camera, AppState};
+use crate::common::{despawn_ui_camera, spawn_ui_camera, UiCamera, AppState, LEVEL_LEN, WIN_W, WIN_H};
+use crate::loading::{LoadingAssets, despawn_with};
 
 pub struct GamePlugin;
 
 impl Plugin for GamePlugin {
     fn build(&self, app: &mut App) {
         app.init_state::<GameState>()
-            .add_systems(OnEnter(AppState::InGame), (spawn_ui_camera, setup_game))
+            .add_systems(Startup, load_level)
+            .add_systems(OnEnter(AppState::InGame), 
+                ((spawn_ui_camera, init_camera_zoom).chain(), setup_game, setup_level),
+            )
             .add_systems(
                 Update,
                 (
@@ -23,6 +27,14 @@ impl Plugin for GamePlugin {
                         .run_if(in_state(AppState::InGame))
                         .run_if(in_state(GameState::Playing))
                         .before(update_player_visual),
+                    screen_transition
+                        .run_if(in_state(AppState::InGame))
+                        .run_if(in_state(GameState::Playing))
+                        .after(move_and_collide),
+                    camera_follow
+                        .run_if(in_state(AppState::InGame))
+                        .run_if(in_state(GameState::Playing))
+                        .after(screen_transition),
                     update_player_visual.run_if(in_state(AppState::InGame)),
                     toggle_pause.run_if(in_state(AppState::InGame)),
                     pause_menu_interaction
@@ -30,7 +42,7 @@ impl Plugin for GamePlugin {
                         .run_if(in_state(GameState::Paused)),
                 ),
             )
-            .add_systems(OnExit(AppState::InGame), (despawn_game, despawn_ui_camera));
+            .add_systems(OnExit(AppState::InGame), (despawn_game, despawn_with::<Background>, despawn_ui_camera));
     }
 }
 
@@ -70,9 +82,111 @@ enum PauseButton {
     Quit,
 }
 
+#[derive(Component)]
+struct Background;
+
+#[derive(Resource)]
+pub struct Backgrounds(Vec<Handle<Image>>);
+
+#[derive(Resource)]
+struct CurrentScreen(usize);
+
+
 const GRAVITY: f32 = 1800.0;
-const WORLD_WIDTH: f32 = 1280.0;
-const WORLD_HEIGHT: f32 = 720.0;
+// replaced world height/width withh WIN_H and WIN_W in common
+
+// Camera and Background
+const ZOOM: f32 = 0.80;      // 0.5 = 2× zoomed in
+const BG_OFFSET_Y: f32 = 65.0;
+const SCREEN_W: f32 = WIN_W * ZOOM; 
+const SCREEN_INSET: f32 = 20.0;
+const START_SCREEN: usize = 1;
+const BG_PATHS: &[&str] = &[
+    "landscape_planets_stars.png",
+    "RainyNeonTokyoAlley.png",
+    "lawn_forest_mountains.png",
+];
+
+// Default Platform
+const GROUND_Y: f32 = -300.0;        // center of the ground platform
+const GROUND_THICKNESS: f32 = 60.0;
+
+// Player Constants
+const PLAYER_HEIGHT: f32 = 60.0;
+const PLAYER_SPAWN_X: f32 = 0.0;
+
+const PLAYER_SPAWN_Y: f32 = GROUND_Y + GROUND_THICKNESS / 2.0 + PLAYER_HEIGHT / 2.0;
+
+// add stuff for loading in foreground later for now just background 
+// might put it in separate file since its more a part of procedural gen
+fn load_level(
+    mut commands: Commands, 
+    asset_server: Res<AssetServer>, 
+    mut loading_assets: ResMut<LoadingAssets>,
+) {
+    let mut handles = Vec::new();
+    for path in BG_PATHS {
+        let handle: Handle<Image> = asset_server.load(*path);
+        loading_assets.0.push(handle.clone().untyped());
+        handles.push(handle);
+    }
+    commands.insert_resource(Backgrounds(handles));
+}
+
+fn setup_level(mut commands: Commands, backgrounds: Res<Backgrounds>) {
+    commands.insert_resource(CurrentScreen(START_SCREEN));
+    commands.spawn((
+        Sprite::from_image(backgrounds.0[START_SCREEN].clone()),
+        Transform::from_xyz(0., BG_OFFSET_Y, -1.),
+        Background,
+    ));
+}
+
+fn screen_transition(
+    mut current: ResMut<CurrentScreen>,
+    backgrounds: Res<Backgrounds>,
+    mut player_q: Query<(&mut Player, &mut Transform)>,
+    mut bg_q: Query<&mut Sprite, With<Background>>,
+) {
+    let Ok((mut player, mut transform)) = player_q.single_mut() else { return; };
+    let Ok(mut sprite) = bg_q.single_mut() else { return; };
+
+    // edge of the background image, not the edge of the view
+    let edge = LEVEL_LEN / 2.0 - player.width / 2.0;
+    let x = transform.translation.x;
+
+    if x >= edge && current.0 + 1 < backgrounds.0.len() {
+        current.0 += 1;
+        transform.translation.x = -edge + SCREEN_INSET;
+    } else if x <= -edge && current.0 > 0 {
+        current.0 -= 1;
+        transform.translation.x = edge - SCREEN_INSET;
+    } else {
+        return;
+    }
+
+    sprite.image = backgrounds.0[current.0].clone();
+    player.velocity.x = 0.0;
+}
+
+// camera pans across the current background, stopping at its edges
+fn camera_follow(
+    player: Single<&Transform, With<Player>>,
+    mut camera: Single<&mut Transform, (With<UiCamera>, Without<Player>)>,
+) {
+    let half_view = SCREEN_W / 2.0;
+    camera.translation.x = player.translation.x.clamp(
+        -LEVEL_LEN / 2.0 + half_view,
+        LEVEL_LEN / 2.0 - half_view,
+    );
+}
+
+fn init_camera_zoom(mut camera: Single<&mut Projection, With<UiCamera>>) {
+    if let Projection::Orthographic(ref mut ortho) = **camera {
+        ortho.scale = ZOOM;
+    }
+}
+
 
 fn despawn_tree(commands: &mut Commands, entity: Entity, children: &Query<&Children>) {
     if let Ok(kids) = children.get(entity) {
@@ -87,16 +201,16 @@ fn setup_game(mut commands: Commands, mut next_game_state: ResMut<NextState<Game
 
     next_game_state.set(GameState::Playing);
 
-    spawn_platform(&mut commands, 0.0, -320.0, 1280.0, 40.0, Color::srgb(0.25, 0.25, 0.3));
+    spawn_platform(&mut commands, 0.0, GROUND_Y, LEVEL_LEN, GROUND_THICKNESS, Color::srgb(0.25, 0.25, 0.3));
 
     commands.spawn((
         Sprite {
             color: Color::srgb(0.2, 0.75, 0.35),
-            custom_size: Some(Vec2::new(40.0, 60.0)),
+            custom_size: Some(Vec2::new(40.0, PLAYER_HEIGHT)),
             ..default()
         },
         Transform {
-            translation: Vec3::new(0.0, -270.0, 1.0),
+            translation: Vec3::new(PLAYER_SPAWN_X, PLAYER_SPAWN_Y, 1.0),
             ..default()
         },
         GlobalTransform::default(),
@@ -215,7 +329,7 @@ fn move_and_collide(
 
         let mut new_x = transform.translation.x + player.velocity.x * delta;
 
-        new_x = new_x.clamp(-WORLD_WIDTH / 2.0 + half_w, WORLD_WIDTH / 2.0 - half_w);
+        new_x = new_x.clamp(-LEVEL_LEN / 2.0 + half_w, LEVEL_LEN / 2.0 - half_w);
 
         for (platform, p_transform) in &platform_query {
             let px = p_transform.translation.x;
@@ -263,9 +377,11 @@ fn move_and_collide(
                 }
             }
         }
-        if new_y < -WORLD_HEIGHT / 2.0 - 100.0 {
-            new_y = -270.0;
-            transform.translation.x = 0.0;
+
+        // Respawn Logic
+        if new_y < -WIN_H / 2.0 - 100.0 {
+            new_y = PLAYER_SPAWN_Y;
+            transform.translation.x = PLAYER_SPAWN_X;
             player.velocity = Vec2::ZERO;
         }
         transform.translation.y = new_y;

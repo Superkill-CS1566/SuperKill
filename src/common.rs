@@ -1,4 +1,7 @@
 use bevy::prelude::*;
+pub const LEVEL_LEN: f32 = 1920.;
+pub const WIN_W: f32 = 1280.;
+pub const WIN_H: f32 = 720.;
 
 // Since the stuff in this file is shared between main.rs, main_menu.rs, and credits.rs, I made them have `pub`.
 #[derive(States, Clone, PartialEq, Eq, Debug, Hash, Default)]
