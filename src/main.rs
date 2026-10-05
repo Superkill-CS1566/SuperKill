@@ -7,11 +7,13 @@ mod procedural_test;
 mod settings;
 mod test;
 mod loading;
+mod network;
 
 use bevy::{prelude::*, window::{EnabledButtons, PresentMode}};
 
 use crate::{common::AppState, credits::CreditsPlugin, game::GamePlugin, main_menu::MainMenuPlugin, settings::SettingsPlugin, test::TestPlugin, loading::LoadingPlugin};
 use crate::procedural_test::ProceduralTestPlugin;
+use crate::network::NetworkPlugin;
 
 
 fn main() {
@@ -33,5 +35,6 @@ fn main() {
         // changed this to just add the plugins
         .add_plugins((MainMenuPlugin, CreditsPlugin, SettingsPlugin, GamePlugin, TestPlugin, LoadingPlugin))
         .add_plugins(ProceduralTestPlugin)
+        .add_plugins(NetworkPlugin)
         .run();
 }
