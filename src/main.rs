@@ -1,20 +1,15 @@
 mod common;
-mod credits;
 mod game;
-mod main_menu;
-mod procedural_generation;
-mod procedural_test;
-mod settings;
-mod test;
 mod loading;
+mod main_menu;
 mod network;
+mod player;
+mod protocol;
 
 use bevy::{prelude::*, window::{EnabledButtons, PresentMode}};
 
-use crate::{common::AppState, credits::CreditsPlugin, game::GamePlugin, main_menu::MainMenuPlugin, settings::SettingsPlugin, test::TestPlugin, loading::LoadingPlugin};
-use crate::procedural_test::ProceduralTestPlugin;
+use crate::{common::AppState, game::GamePlugin, loading::LoadingPlugin, main_menu::MainMenuPlugin};
 use crate::network::NetworkPlugin;
-
 
 fn main() {
     App::new()
@@ -32,9 +27,6 @@ fn main() {
             ..default()
         }))
         .init_state::<AppState>()
-        // changed this to just add the plugins
-        .add_plugins((MainMenuPlugin, CreditsPlugin, SettingsPlugin, GamePlugin, TestPlugin, LoadingPlugin))
-        .add_plugins(ProceduralTestPlugin)
-        .add_plugins(NetworkPlugin)
+        .add_plugins((MainMenuPlugin, GamePlugin, LoadingPlugin, NetworkPlugin))
         .run();
 }
