@@ -1,27 +1,27 @@
 use bevy::prelude::*;
 
 use crate::common::{despawn_ui_camera, spawn_ui_camera, AppState};
-use crate::procedural_generation::{generate_maze, Tile};
+use crate::recursive_generation::{rd_generate_maze, Tile};
 
 const MAZE_WIDTH: usize = 31;
 const MAZE_HEIGHT: usize = 17;
 const TILE_SIZE: f32 = 32.0;
 
-pub struct ProceduralTestPlugin;
+pub struct RecursiveTestPlugin;
 
-impl Plugin for ProceduralTestPlugin {
+impl Plugin for RecursiveTestPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(MazeSeed(1))
             .add_systems(
-                OnEnter(AppState::DFSMazeTesting),
+                OnEnter(AppState::RDMazeTesting),
                 (spawn_ui_camera, setup_maze_test),
             )
             .add_systems(
                 Update,
-                maze_test_controls.run_if(in_state(AppState::DFSMazeTesting)),
+                maze_test_controls.run_if(in_state(AppState::RDMazeTesting)),
             )
             .add_systems(
-                OnExit(AppState::DFSMazeTesting),
+                OnExit(AppState::RDMazeTesting),
                 (despawn_maze_test, despawn_ui_camera),
             );
     }
@@ -31,7 +31,7 @@ impl Plugin for ProceduralTestPlugin {
 struct MazeSeed(u64);
 
 #[derive(Component)]
-struct ProceduralTestRoot;
+struct RecursiveTestRoot;
 
 fn setup_maze_test(mut commands: Commands, mut seed: ResMut<MazeSeed>) {
     seed.0 = 1;
@@ -42,7 +42,7 @@ fn maze_test_controls(
     keys: Res<ButtonInput<KeyCode>>,
     mut commands: Commands,
     mut seed: ResMut<MazeSeed>,
-    roots: Query<Entity, With<ProceduralTestRoot>>,
+    roots: Query<Entity, With<RecursiveTestRoot>>,
     mut next_state: ResMut<NextState<AppState>>,
 ) {
     if keys.just_pressed(KeyCode::Escape) {
@@ -60,7 +60,7 @@ fn maze_test_controls(
 }
 
 fn spawn_maze(commands: &mut Commands, seed: u64) {
-    let maze = generate_maze(MAZE_WIDTH, MAZE_HEIGHT, seed);
+    let maze = rd_generate_maze(MAZE_WIDTH, MAZE_HEIGHT, seed);
     let maze_center_y = -24.0;
 
     for y in 0..maze.height() {
@@ -81,14 +81,14 @@ fn spawn_maze(commands: &mut Commands, seed: u64) {
             commands.spawn((
                 Sprite::from_color(color, Vec2::splat(TILE_SIZE - 1.0)),
                 Transform::from_xyz(world_x, world_y, 0.0),
-                ProceduralTestRoot,
+                RecursiveTestRoot,
             ));
         }
     }
 
     commands.spawn((
         Text::new(format!(
-            "Procedural Maze   Seed: {seed}   R: Regenerate   Esc: Menu"
+            "Recursive Maze   Seed: {seed}   R: Regenerate   Esc: Menu"
         )),
         TextFont {
             font_size: FontSize::Px(24.0),
@@ -101,13 +101,13 @@ fn spawn_maze(commands: &mut Commands, seed: u64) {
             left: Val::Px(18.0),
             ..default()
         },
-        ProceduralTestRoot,
+        RecursiveTestRoot,
     ));
 }
 
 fn despawn_maze_test(
     mut commands: Commands,
-    query: Query<Entity, With<ProceduralTestRoot>>,
+    query: Query<Entity, With<RecursiveTestRoot>>,
 ) {
     for entity in &query {
         commands.entity(entity).despawn();
