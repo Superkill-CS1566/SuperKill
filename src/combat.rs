@@ -2,7 +2,7 @@ use bevy::prelude::*;
 
 use crate::camera::{camera_follow, SCREEN_W};
 use crate::common::{AppState, UiCamera};
-use crate::game::GameState;
+use crate::game::{CurrentScreen, GameState};
 use crate::player::{Player, PlayerSide, PLAYER_SPAWN_Y};
 
 pub struct CombatPlugin;
@@ -39,12 +39,25 @@ pub struct Priority(pub Option<PlayerSide>);
 #[derive(Component)]
 pub struct Dead {
     killer_x_at_death: f32,
+    /// Backstop: brings them back even if the leader never advances.
+    timer: Timer,
+}
+
+impl Dead {
+    fn new(killer_x: f32) -> Self {
+        Self {
+            killer_x_at_death: killer_x,
+            timer: Timer::from_seconds(RESPAWN_MAX_WAIT, TimerMode::Once),
+        }
+    }
 }
 
 /// How far the leader must advance before the dead fighter returns.
 const RESPAWN_ADVANCE: f32 = 220.0;
 /// How far inside the screen edge they reappear.
-const RESPAWN_INSET: f32 = 60.0;
+const RESPAWN_INSET: f32 = 30.0;
+/// Longest a fighter can stay down, regardless of the leader's progress.
+const RESPAWN_MAX_WAIT: f32 = 4.0;
 
 fn reset_priority(mut priority: ResMut<Priority>) {
     priority.0 = None;
@@ -85,12 +98,9 @@ fn debug_kill(
         return;
     };
 
-    commands.entity(victim).insert((
-        Dead {
-            killer_x_at_death: killer_x,
-        },
-        Visibility::Hidden,
-    ));
+    commands
+        .entity(victim)
+        .insert((Dead::new(killer_x), Visibility::Hidden));
 
     // a kill hands priority to the survivor; a double-down resets to neutral
     priority.0 = if killer_alive {
@@ -102,17 +112,24 @@ fn debug_kill(
 
 fn check_respawn(
     mut commands: Commands,
+    time: Res<Time>,
     priority: Res<Priority>,
+    current_screen: Res<CurrentScreen>,
     camera: Single<&Transform, With<UiCamera>>,
     mut dead: Query<
-        (Entity, &mut Player, &mut Transform, &PlayerSide, &Dead),
+        (Entity, &mut Player, &mut Transform, &PlayerSide, &mut Dead),
         Without<UiCamera>,
     >,
     alive: Query<(&Transform, &PlayerSide), (With<Player>, Without<Dead>)>,
 ) {
     let half_view = SCREEN_W / 2.0;
+    // a new screen is a checkpoint — anyone down comes back on arrival
+    let screen_changed = current_screen.is_changed();
 
-    for (entity, mut player, mut transform, side, dead_info) in &mut dead {
+    for (entity, mut player, mut transform, side, mut dead_info) in &mut dead {
+        dead_info.timer.tick(time.delta());
+        let waited_long_enough = dead_info.timer.is_finished();
+
         let respawn_x = match priority.0 {
             // neutral — both went down, everyone back to their starting marks
             None => side.spawn_x(),
@@ -122,7 +139,10 @@ fn check_respawn(
                 };
                 let dir = holder.advance_dir();
                 let advanced = (holder_t.translation.x - dead_info.killer_x_at_death) * dir;
-                if advanced < RESPAWN_ADVANCE {
+
+                // positions reset on a screen change, so the distance check is
+                // only meaningful within one screen
+                if !screen_changed && !waited_long_enough && advanced < RESPAWN_ADVANCE {
                     continue;
                 }
                 // appear at the edge the leader is pushing toward
@@ -177,12 +197,9 @@ fn cage_and_crush(
                 let trailing = if dir > 0.0 { min } else { max };
                 // behind the leader's back edge — crushed out of frame
                 if (x - trailing) * dir < 0.0 {
-                    commands.entity(entity).insert((
-                        Dead {
-                            killer_x_at_death: hx,
-                        },
-                        Visibility::Hidden,
-                    ));
+                    commands
+                        .entity(entity)
+                        .insert((Dead::new(hx), Visibility::Hidden));
                     continue;
                 }
             }
