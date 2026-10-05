@@ -39,6 +39,7 @@ pub struct Controls {
     pub right: KeyCode,
     pub jump: KeyCode,
     pub crouch: KeyCode,
+    pub attack: KeyCode,
 }
 
 // 玩家组件
@@ -50,6 +51,7 @@ pub struct Player {
     pub is_crouching: bool,
     pub prev_crouching: bool,
     pub velocity: Vec2,
+    pub facing: f32,    // -1.0 = facing left 1.0 = facing right
     pub width: f32,
     pub height: f32,
     pub crouch_height: f32,
@@ -95,7 +97,7 @@ impl PlayerSide {
     fn color(self) -> Color {
         match self {
             PlayerSide::Left => Color::srgb(0.2, 0.75, 0.35),
-            PlayerSide::Right => Color::srgb(0.85, 0.3, 0.3),
+            PlayerSide::Right => Color::srgb(0.35, 0.2, 0.75),
         }
     }
 
@@ -106,12 +108,14 @@ impl PlayerSide {
                 right: KeyCode::KeyD,
                 jump: KeyCode::KeyW,
                 crouch: KeyCode::KeyS,
+                attack: KeyCode::KeyG,
             },
             PlayerSide::Right => Controls {
                 left: KeyCode::ArrowLeft,
                 right: KeyCode::ArrowRight,
                 jump: KeyCode::ArrowUp,
                 crouch: KeyCode::ArrowDown,
+                attack: KeyCode::KeyH,
             },
         }
     }
@@ -142,6 +146,7 @@ fn spawn_player(commands: &mut Commands, side: PlayerSide) {
             is_crouching: false,
             prev_crouching: false,
             velocity: Vec2::ZERO,
+            facing: side.advance_dir(),
             width: PLAYER_WIDTH,
             height: PLAYER_HEIGHT,
             crouch_height: CROUCH_HEIGHT,
@@ -175,6 +180,11 @@ fn player_movement(
         }
         if keyboard.pressed(controls.right) {
             move_dir += 1.0;
+        }
+
+        // keep facing the last direction walked
+        if move_dir != 0.0 {
+            player.facing = move_dir;
         }
 
         // 下蹲时移动速度减半

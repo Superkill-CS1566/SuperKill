@@ -2,8 +2,9 @@ use bevy::prelude::*;
 
 use crate::camera::{camera_follow, SCREEN_W};
 use crate::common::{AppState, UiCamera};
+use crate::loading::despawn_with;
 use crate::game::{CurrentScreen, GameState};
-use crate::player::{Player, PlayerSide, PLAYER_SPAWN_Y};
+use crate::player::{Controls, Player, PlayerSide, PLAYER_SPAWN_Y};
 
 pub struct CombatPlugin;
 
@@ -18,6 +19,13 @@ impl Plugin for CombatPlugin {
                     .run_if(in_state(AppState::InGame))
                     .run_if(in_state(GameState::Playing)),
             )
+            .add_systems(
+                Update,
+                (spawn_attacks, update_hitboxes, hitbox_hits)
+                    .chain()
+                    .run_if(in_state(AppState::InGame))
+                    .run_if(in_state(GameState::Playing)),
+            )
             // runs once the camera has settled, so the edges are final
             .add_systems(
                 Update,
@@ -25,7 +33,8 @@ impl Plugin for CombatPlugin {
                     .run_if(in_state(AppState::InGame))
                     .run_if(in_state(GameState::Playing))
                     .after(camera_follow),
-            );
+            )
+            .add_systems(OnExit(AppState::InGame), despawn_with::<Hitbox>);
     }
 }
 
@@ -55,9 +64,25 @@ impl Dead {
 /// How far the leader must advance before the dead fighter returns.
 const RESPAWN_ADVANCE: f32 = 220.0;
 /// How far inside the screen edge they reappear.
-const RESPAWN_INSET: f32 = 30.0;
+const RESPAWN_INSET: f32 = 60.0;
 /// Longest a fighter can stay down, regardless of the leader's progress.
 const RESPAWN_MAX_WAIT: f32 = 4.0;
+
+/// A swing. Lives briefly in front of its owner and kills on contact.
+#[derive(Component)]
+pub struct Hitbox {
+    owner: PlayerSide,
+    width: f32,
+    height: f32,
+    life: Timer,
+}
+
+const ATTACK_W: f32 = 55.0;
+const ATTACK_H: f32 = 24.0;
+/// How long a swing stays out — also acts as the attack cooldown, since a
+/// fighter can't swing again while their hitbox is still alive.
+const ATTACK_DURATION: f32 = 0.18;
+const ATTACK_COLOR: Color = Color::srgb(0.9, 0.15, 0.15);
 
 fn reset_priority(mut priority: ResMut<Priority>) {
     priority.0 = None;
@@ -134,11 +159,19 @@ fn check_respawn(
             // neutral — both went down, everyone back to their starting marks
             None => side.spawn_x(),
             Some(holder) => {
-                let Some((holder_t, _)) = alive.iter().find(|(_, s)| **s == holder) else {
+                // where the fighter holding priority is standing
+                let mut holder_x = None;
+                for (transform, side) in &alive {
+                    if *side == holder {
+                        holder_x = Some(transform.translation.x);
+                    }
+                }
+                let Some(holder_x) = holder_x else {
                     continue;
                 };
+
                 let dir = holder.advance_dir();
-                let advanced = (holder_t.translation.x - dead_info.killer_x_at_death) * dir;
+                let advanced = (holder_x - dead_info.killer_x_at_death) * dir;
 
                 // positions reset on a screen change, so the distance check is
                 // only meaningful within one screen
@@ -178,12 +211,14 @@ fn cage_and_crush(
 
     // where the leader stands right now, recorded on any crush death
     let holder = priority.0;
-    let holder_x = holder.and_then(|h| {
-        players
-            .iter()
-            .find(|(_, _, _, s)| **s == h)
-            .map(|(_, _, t, _)| t.translation.x)
-    });
+    let mut holder_x = None;
+    if let Some(h) = holder {
+        for (_, _, transform, side) in &players {
+            if *side == h {
+                holder_x = Some(transform.translation.x);
+            }
+        }
+    }
 
     for (entity, player, mut transform, side) in &mut players {
         let half_w = player.width / 2.0;
@@ -206,5 +241,132 @@ fn cage_and_crush(
         }
 
         transform.translation.x = x.clamp(min, max);
+    }
+}
+
+fn spawn_attacks(
+    mut commands: Commands,
+    keyboard: Res<ButtonInput<KeyCode>>,
+    players: Query<(&Player, &Transform, &PlayerSide, &Controls), Without<Dead>>,
+    hitboxes: Query<&Hitbox>,
+) {
+    for (player, transform, side, controls) in &players {
+        if !keyboard.just_pressed(controls.attack) {
+            continue;
+        }
+        // one swing at a time
+        if hitboxes.iter().any(|h| h.owner == *side) {
+            continue;
+        }
+
+        commands.spawn((
+            Sprite {
+                color: ATTACK_COLOR,
+                custom_size: Some(Vec2::new(ATTACK_W, ATTACK_H)),
+                ..default()
+            },
+            Transform::from_xyz(
+                transform.translation.x + player.facing * (player.width + ATTACK_W) / 2.0,
+                transform.translation.y,
+                2.0,
+            ),
+            GlobalTransform::default(),
+            Hitbox {
+                owner: *side,
+                width: ATTACK_W,
+                height: ATTACK_H,
+                life: Timer::from_seconds(ATTACK_DURATION, TimerMode::Once),
+            },
+        ));
+    }
+}
+
+// the swing travels with its owner, and expires on its own
+fn update_hitboxes(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut hitboxes: Query<(Entity, &mut Hitbox, &mut Transform), Without<Player>>,
+    players: Query<(&Player, &Transform, &PlayerSide), Without<Dead>>,
+) {
+    for (entity, mut hitbox, mut hb_transform) in &mut hitboxes {
+        hitbox.life.tick(time.delta());
+        if hitbox.life.is_finished() {
+            commands.entity(entity).despawn();
+            continue;
+        }
+
+        // stay in front of whoever swung it
+        let mut owner = None;
+        for (player, p_transform, side) in &players {
+            if *side == hitbox.owner {
+                owner = Some((player.facing, player.width, p_transform.translation));
+            }
+        }
+
+        match owner {
+            Some((facing, width, owner_pos)) => {
+                hb_transform.translation.x =
+                    owner_pos.x + facing * (width + hitbox.width) / 2.0;
+                hb_transform.translation.y = owner_pos.y;
+            }
+            // owner died mid-swing
+            None => {
+                commands.entity(entity).despawn();
+            }
+        }
+    }
+}
+
+// contact is an instant kill for now — no health, no blocking
+fn hitbox_hits(
+    mut commands: Commands,
+    mut priority: ResMut<Priority>,
+    hitboxes: Query<(&Hitbox, &Transform)>,
+    players: Query<(Entity, &Player, &Transform, &PlayerSide), Without<Dead>>,
+) {
+    for (hitbox, hb_transform) in &hitboxes {
+        // where the attacker stands, for the respawn-distance check
+        let mut attacker_x = None;
+        for (_, _, transform, side) in &players {
+            if *side == hitbox.owner {
+                attacker_x = Some(transform.translation.x);
+            }
+        }
+        let Some(attacker_x) = attacker_x else {
+            continue;
+        };
+
+        let hb_half_w = hitbox.width / 2.0;
+        let hb_half_h = hitbox.height / 2.0;
+        let hb_x = hb_transform.translation.x;
+        let hb_y = hb_transform.translation.y;
+
+        for (entity, player, p_transform, side) in &players {
+            if *side == hitbox.owner {
+                continue;
+            }
+
+            let p_h = if player.is_crouching {
+                player.crouch_height
+            } else {
+                player.height
+            };
+            let p_half_w = player.width / 2.0;
+            let p_half_h = p_h / 2.0;
+            let px = p_transform.translation.x;
+            let py = p_transform.translation.y;
+
+            let overlaps_x = (hb_x - hb_half_w) <= (px + p_half_w)
+                && (hb_x + hb_half_w) >= (px - p_half_w);
+            let overlaps_y = (hb_y - hb_half_h) <= (py + p_half_h)
+                && (hb_y + hb_half_h) >= (py - p_half_h);
+
+            if overlaps_x && overlaps_y {
+                commands
+                    .entity(entity)
+                    .insert((Dead::new(attacker_x), Visibility::Hidden));
+                priority.0 = Some(hitbox.owner);
+            }
+        }
     }
 }

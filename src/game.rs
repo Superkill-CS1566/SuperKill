@@ -65,9 +65,9 @@ const BG_OFFSET_Y: f32 = 65.0;
 const SCREEN_INSET: f32 = 20.0;
 const START_SCREEN: usize = 1;
 const BG_PATHS: &[&str] = &[
-    "landscape_planets_stars.png",
-    "RainyNeonTokyoAlley.png",
-    "lawn_forest_mountains.png",
+    "white_grid_inverted.png",
+    "white_grid.png",   // start screen
+    "white_grid_inverted.png",
 ];
 
 // add stuff for loading in foreground later for now just background 
