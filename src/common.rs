@@ -18,8 +18,9 @@ pub enum AppState {
     Loading, 
     Testing,
     ProcGenMenu,
-    MazeTesting,
-    PNoiseTesting
+    DFSMazeTesting,
+    PNoiseTesting,
+    RDMazeTesting
 }
 
 // camera

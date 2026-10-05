@@ -13,6 +13,8 @@ mod loading;
 mod perlin_noise;
 mod perlin_noise_test;
 mod procedural_gen_menu;
+mod recursive_generation;
+mod recursive_test;
 
 use bevy::{prelude::*, window::{EnabledButtons, PresentMode}};
 
@@ -23,6 +25,7 @@ use crate::player::PlayerPlugin;
 use crate::procedural_test::ProceduralTestPlugin;
 use crate::perlin_noise_test::PerlinNoiseTestPlugin;
 use crate::procedural_gen_menu::ProcGenPlugin;
+use crate::recursive_test::RecursiveTestPlugin;
 
 
 fn main() {
@@ -48,5 +51,6 @@ fn main() {
         .add_plugins(ProceduralTestPlugin)
         .add_plugins(PerlinNoiseTestPlugin)
         .add_plugins(ProcGenPlugin)
+        .add_plugins(RecursiveTestPlugin)
         .run();
 }

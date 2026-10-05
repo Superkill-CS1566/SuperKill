@@ -18,10 +18,13 @@ impl Plugin for ProcGenPlugin {
 struct ProcGenRoot;
 
 #[derive(Component)]
-struct MazeTestButton;
+struct DFSMazeTestButton;
 
 #[derive(Component)]
 struct NoiseTestButton;
+
+#[derive(Component)]
+struct RDMazeTestButton;
 
 #[derive(Component)]
 struct ExitButton;
@@ -52,7 +55,7 @@ fn spawn_main_menu(mut commands: Commands) {
         parent
             .spawn((
                 Button,
-                MazeTestButton,
+                DFSMazeTestButton,
                 Node {
                     width: Val::Px(280.0),
                     height: Val::Px(70.0),
@@ -67,7 +70,34 @@ fn spawn_main_menu(mut commands: Commands) {
             ))
             .with_children(|p| {
                 p.spawn((
-                    Text::new("Maze Test"),
+                    Text::new("DFS Maze Test"),
+                    TextFont {
+                        font_size: FontSize::Px(30.0),
+                        ..default()
+                    },
+                    TextColor(Color::WHITE),
+                ));
+            });
+        
+        parent
+            .spawn((
+                Button,
+                RDMazeTestButton,
+                Node {
+                    width: Val::Px(280.0),
+                    height: Val::Px(70.0),
+                    align_self: AlignSelf::Center,
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::Center,
+                    border: UiRect::all(Val::Px(3.0)),
+                    ..default()
+                },
+                BackgroundColor(Color::srgb(0.2, 0.45, 0.75)),
+                BorderColor::all(Color::srgb(0.4, 0.7, 0.95)),
+            ))
+            .with_children(|p| {
+                p.spawn((
+                    Text::new("RD Maze Test"),
                     TextFont {
                         font_size: FontSize::Px(30.0),
                         ..default()
@@ -151,20 +181,26 @@ fn menu_button_node() -> Node {
 
 // handle interact with bottons
 fn button_interaction(
-    mut maze_test_q: Query<&Interaction, (Changed<Interaction>, With<MazeTestButton>)>,
+    mut dfs_maze_test_q: Query<&Interaction, (Changed<Interaction>, With<DFSMazeTestButton>)>,
     mut noise_test_q: Query<&Interaction, (Changed<Interaction>, With<NoiseTestButton>)>,
+    mut rd_maze_test_q: Query<&Interaction, (Changed<Interaction>, With <RDMazeTestButton>)>,
     mut exit_q: Query<&Interaction, (Changed<Interaction>, With<ExitButton>)>,
     mut next_state: ResMut<NextState<AppState>>,
     mut exit: MessageWriter<AppExit>,
 ) {
-    for interaction in &mut maze_test_q {
+    for interaction in &mut dfs_maze_test_q {
         if let Interaction::Pressed = *interaction {
-            next_state.set(AppState::MazeTesting);
+            next_state.set(AppState::DFSMazeTesting);
         }
     }
     for interaction in &mut noise_test_q {
         if let Interaction::Pressed = *interaction {
             next_state.set(AppState::PNoiseTesting);
+        }
+    }
+    for interaction in &mut rd_maze_test_q {
+        if let Interaction::Pressed = *interaction {
+            next_state.set(AppState::RDMazeTesting);
         }
     }
     for interaction in &mut exit_q {
