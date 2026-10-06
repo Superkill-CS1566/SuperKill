@@ -89,7 +89,6 @@ fn update_loading(
     // account for fake TimedLoad "Asset"
     let total = loading_assets.len() + 1;
     let percent = (loaded as f32) / (total as f32);
-
     progress_transform.scale.x = PROGRESS_LENGTH * percent;
 
     // Check if all assets are loaded

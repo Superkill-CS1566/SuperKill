@@ -88,7 +88,7 @@ Levels are built from preset assets (NPCs, weapons, obstacles). There are a few 
 	* Implement server-side rewind for latency compensation during attacks and parries.
 
 * 35%: Procedural generation for in-between screens.
-	* Generate playable in-between screens using the DFS-based maze generation system. 
+	* Generate playable in-between screens using RD maze generation and Perlin Noise terrain generation. 
 	* Procedurally place obstacles, weapons, NPCs, and other level objects without blocking required player paths. 
 	* Ensure generated levels remain traversable in both directions.
 
