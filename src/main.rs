@@ -1,35 +1,29 @@
 mod camera;
 mod combat;
 mod common;
+mod credits;
 mod game;
 mod loading;
 mod main_menu;
 mod network;
-mod player;
-mod protocol;
-
-use bevy::{prelude::*, window::{EnabledButtons, PresentMode}};
-
-use crate::{common::AppState, game::GamePlugin, loading::LoadingPlugin, main_menu::MainMenuPlugin};
-use crate::network::NetworkPlugin;
-mod main_menu;
-mod player;
-mod procedural_generation;
-mod procedural_test;
-mod settings;
-mod test;
-mod loading;
 mod perlin_noise;
 mod perlin_noise_test;
+mod player;
 mod procedural_gen_menu;
+mod procedural_generation;
+mod procedural_test;
+mod protocol;
 mod recursive_generation;
 mod recursive_test;
+mod settings;
+mod test;
 
 use bevy::{prelude::*, window::{EnabledButtons, PresentMode}};
 
-use crate::{common::AppState::{self}, credits::CreditsPlugin, game::GamePlugin, loading::LoadingPlugin, main_menu::MainMenuPlugin, settings::SettingsPlugin, test::TestPlugin};
+use crate::{common::AppState, credits::CreditsPlugin, game::GamePlugin, loading::LoadingPlugin, main_menu::MainMenuPlugin, settings::SettingsPlugin, test::TestPlugin};
 use crate::camera::CameraPlugin;
 use crate::combat::CombatPlugin;
+use crate::network::NetworkPlugin;
 use crate::player::PlayerPlugin;
 use crate::procedural_test::ProceduralTestPlugin;
 use crate::perlin_noise_test::PerlinNoiseTestPlugin;
@@ -53,11 +47,10 @@ fn main() {
             ..default()
         }))
         .init_state::<AppState>()
-        .add_plugins((MainMenuPlugin, GamePlugin, LoadingPlugin, NetworkPlugin))
         // changed this to just add the plugins
         .add_plugins((MainMenuPlugin, CreditsPlugin, SettingsPlugin, TestPlugin, LoadingPlugin))
         // in-game: level + fighters + camera + combat
-        .add_plugins((GamePlugin, PlayerPlugin, CameraPlugin, CombatPlugin))
+        .add_plugins((GamePlugin, PlayerPlugin, CameraPlugin, CombatPlugin, NetworkPlugin))
         .add_plugins(ProceduralTestPlugin)
         .add_plugins(PerlinNoiseTestPlugin)
         .add_plugins(ProcGenPlugin)
