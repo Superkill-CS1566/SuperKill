@@ -1,8 +1,17 @@
 mod camera;
 mod combat;
 mod common;
-mod credits;
 mod game;
+mod loading;
+mod main_menu;
+mod network;
+mod player;
+mod protocol;
+
+use bevy::{prelude::*, window::{EnabledButtons, PresentMode}};
+
+use crate::{common::AppState, game::GamePlugin, loading::LoadingPlugin, main_menu::MainMenuPlugin};
+use crate::network::NetworkPlugin;
 mod main_menu;
 mod player;
 mod procedural_generation;
@@ -44,6 +53,7 @@ fn main() {
             ..default()
         }))
         .init_state::<AppState>()
+        .add_plugins((MainMenuPlugin, GamePlugin, LoadingPlugin, NetworkPlugin))
         // changed this to just add the plugins
         .add_plugins((MainMenuPlugin, CreditsPlugin, SettingsPlugin, TestPlugin, LoadingPlugin))
         // in-game: level + fighters + camera + combat
