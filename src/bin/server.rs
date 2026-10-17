@@ -71,6 +71,14 @@ async fn main() -> io::Result<()> {
                     println!("Heartbeat from Player {pid} ({addr})");
                 }
             }
+
+            ClientMessage::PlayerInput(input) => {
+                if let Some(player_id) = players.get(&addr) {
+                    println!("Iput from Player {player_id}: {input:?}")
+                } else {
+                    println!("Ignoring input from unregistered client {addr}")
+                }
+            }
         }
     }
 }

@@ -4,7 +4,7 @@ use postcard::{from_bytes, to_allocvec};
 
 #[path = "../protocol.rs"]
 mod protocol;
-use protocol::{ClientMessage, ServerMessage};
+use protocol::{ClientMessage, PlayerInput, ServerMessage};
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
@@ -24,6 +24,23 @@ async fn main() -> io::Result<()> {
 
     let reply: ServerMessage = from_bytes(&buf[..len]).expect("Failed to deserialize");
     println!("Received from server: {reply:?}");
+
+    // Test input to check if PlayerInput Works
+    let input = PlayerInput {
+        movement_x: 1.0, 
+        movement_y: 0.0, 
+        jump: false,
+        block: false,
+    };
+
+    let input_message = ClientMessage::PlayerInput(input);
+
+    let input_bytes = 
+        to_allocvec(&input_message).expect("Failed to serialize player input");
+
+
+    socket.send_to(&input_bytes, server_address).await?;
+    println!("Sent test player input");
 
     Ok(())
 }
