@@ -1,3 +1,5 @@
+use crate::simplerng::SimpleRng;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tile {
     Wall,
@@ -38,7 +40,7 @@ impl MazeGrid {
 }
 
 // Uses depth-first search to carve passages between odd-numbered grid cells.
-pub fn generate_maze(width: usize, height: usize, seed: u64) -> MazeGrid {
+pub fn generate_maze(width: usize, height: usize, master_seed: u64, level: u32) -> MazeGrid {
     assert!(width >= 3 && height >= 3, "maze must be at least 3 by 3");
     assert!(
         width % 2 == 1 && height % 2 == 1,
@@ -46,7 +48,10 @@ pub fn generate_maze(width: usize, height: usize, seed: u64) -> MazeGrid {
     );
 
     let mut grid = MazeGrid::new(width, height);
-    let mut rng = SimpleRng::new(seed);
+
+    let level_seed = SimpleRng::derive_seed(master_seed, level);
+    let mut rng = SimpleRng::new(level_seed);
+
     let mut stack = vec![(1_usize, 1_usize)];
     grid.set_floor(1, 1);
 
@@ -85,30 +90,6 @@ pub fn generate_maze(width: usize, height: usize, seed: u64) -> MazeGrid {
     grid
 }
 
-struct SimpleRng {
-    state: u64,
-}
-
-impl SimpleRng {
-    fn new(seed: u64) -> Self {
-        Self { state: seed.max(1) }
-    }
-
-    fn next(&mut self) -> u64 {
-        self.state ^= self.state << 13;
-        self.state ^= self.state >> 7;
-        self.state ^= self.state << 17;
-        self.state
-    }
-
-    fn shuffle<T>(&mut self, values: &mut [T]) {
-        for index in (1..values.len()).rev() {
-            let other = self.next() as usize % (index + 1);
-            values.swap(index, other);
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::collections::{HashSet, VecDeque};
@@ -117,12 +98,12 @@ mod tests {
 
     #[test]
     fn same_seed_produces_same_maze() {
-        assert_eq!(generate_maze(21, 13, 7), generate_maze(21, 13, 7));
+        assert_eq!(generate_maze(21, 13, 7, 1), generate_maze(21, 13, 7, 1));
     }
 
     #[test]
     fn every_floor_tile_is_connected() {
-        let grid = generate_maze(21, 13, 11);
+        let grid = generate_maze(21, 13, 11, 1);
         let mut visited = HashSet::new();
         let mut queue = VecDeque::from([(1_usize, 0_usize)]);
 

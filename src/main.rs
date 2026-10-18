@@ -17,6 +17,7 @@ mod recursive_generation;
 mod recursive_test;
 mod settings;
 mod test;
+mod simplerng;
 
 use bevy::{prelude::*, window::{EnabledButtons, PresentMode}};
 
