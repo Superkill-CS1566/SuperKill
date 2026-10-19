@@ -1,5 +1,14 @@
 use serde::{Deserialize, Serialize};
 
+// Add player snapshot
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct PlayerSnapshot {
+    pub player_id: u8, 
+    pub position_x: f32, 
+    pub position_y: f32,
+}
+
+
 // Define player input
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct PlayerInput {
@@ -21,4 +30,8 @@ pub enum ServerMessage {
     Connected { player_id: u8 },
     Rejected { reason: String },
     PlayerJoined { player_id: u8 },
+
+    Gamestate {
+        players: Vec<PlayerSnapshot>
+    }
 }
