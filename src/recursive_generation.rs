@@ -1,3 +1,5 @@
+use crate::simplerng::*;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tile {
     Wall,
@@ -42,7 +44,7 @@ impl MazeGrid {
 }
 
 // Uses recursive division to construct walls/create paths in odd-numbered cells.
-pub fn rd_generate_maze(width: usize, height: usize, seed: u64) -> MazeGrid {
+pub fn rd_generate_maze(width: usize, height: usize, master_seed: u64, level: u32) -> MazeGrid {
     assert!(width >= 3 && height >= 3, "maze must be at least 3 by 3");
     assert!(
         width % 2 == 1 && height % 2 == 1,
@@ -50,7 +52,10 @@ pub fn rd_generate_maze(width: usize, height: usize, seed: u64) -> MazeGrid {
     );
 
     let mut grid = MazeGrid::new(width, height);
-    let mut rng = SimpleRng::new(seed);
+
+    let level_seed = SimpleRng::derive_seed(master_seed, level);
+    let mut rng = SimpleRng::new(level_seed);
+
     let is_horizon = false;
     divide(&mut grid, &mut rng, 0, 0, width, height, is_horizon);
     grid
@@ -109,41 +114,6 @@ fn divide(grid: &mut MazeGrid, rng: &mut SimpleRng, x: usize, y: usize, width: u
     }
 }
 
-struct SimpleRng {
-    state: u64,
-}
-
-impl SimpleRng {
-    fn new(seed: u64) -> Self {
-        Self { state: seed.max(1) }
-    }
-
-    fn next(&mut self) -> u64 {
-        self.state ^= self.state << 21;
-        self.state ^= self.state >> 35;
-        self.state ^= self.state << 4;
-        self.state
-    }
-
-    // Uses the rng function to get a random number that's either odd or even
-    fn range(&mut self, low: usize, high: usize, is_odd: bool) -> usize {
-        if low >= high {
-            return low;
-        }
-        let random = self.next() as usize;
-        let range = high - low + 1;
-        let mut val = (random % range) + low;
-        if (val % 2 == 0 && is_odd) || (val % 2 == 1 && !is_odd) {
-            if val + 1 <= high {
-                val += 1;
-            } else if val - 1 >= low {
-                val -= 1;
-            }
-        }
-        val
-    }
-}
-
 // Used same tests as procedural_generation.rs
 #[cfg(test)]
 mod tests {
@@ -153,12 +123,12 @@ mod tests {
 
     #[test]
     fn rd_same_seed_produces_same_maze() {
-        assert_eq!(rd_generate_maze(55, 33, 11), rd_generate_maze(55, 33, 11));
+        assert_eq!(rd_generate_maze(55, 33, 11, 1), rd_generate_maze(55, 33, 11, 1));
     }
 
     #[test]
     fn rd_every_floor_tile_is_connected() {
-        let grid = rd_generate_maze(21, 13, 11);
+        let grid = rd_generate_maze(21, 13, 11, 1);
         let mut visited = HashSet::new();
         let mut queue = VecDeque::from([(1_usize, 0_usize)]);
 

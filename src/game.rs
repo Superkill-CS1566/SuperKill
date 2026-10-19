@@ -4,6 +4,8 @@ use crate::common::{AppState, Platform, GROUND_THICKNESS, GROUND_Y, LEVEL_LEN};
 use crate::combat::{Dead, Priority};
 use crate::loading::{LoadingAssets, despawn_with};
 use crate::player::{move_and_collide, Player, PlayerSide};
+use crate::perlin_noise::sample_chunk;
+use crate::simplerng::SimpleRng;
 
 pub struct GamePlugin;
 
@@ -54,6 +56,8 @@ pub struct Backgrounds(Vec<Handle<Image>>);
 #[derive(Resource)]
 pub struct CurrentScreen(usize);
 
+#[derive(Resource)]
+struct Seed(u64);
 
 // replaced world height/width withh WIN_H and WIN_W in common
 // GRAVITY and the player constants now live in player.rs
@@ -84,6 +88,7 @@ fn load_level(
         handles.push(handle);
     }
     commands.insert_resource(Backgrounds(handles));
+    commands.insert_resource(Seed(1));
 }
 
 fn setup_level(mut commands: Commands, backgrounds: Res<Backgrounds>) {
@@ -152,11 +157,17 @@ fn despawn_tree(commands: &mut Commands, entity: Entity, children: &Query<&Child
     commands.entity(entity).despawn();
 }
 
-fn setup_game(mut commands: Commands, mut next_game_state: ResMut<NextState<GameState>>) {
+fn setup_game(mut commands: Commands, seed: Res<Seed>, mut next_game_state: ResMut<NextState<GameState>>) {
 
     next_game_state.set(GameState::Playing);
 
-    spawn_platform(&mut commands, 0.0, GROUND_Y, LEVEL_LEN, GROUND_THICKNESS, Color::srgb(0.25, 0.25, 0.3));
+    //spawn_platform(&mut commands, 0.0, GROUND_Y, LEVEL_LEN, GROUND_THICKNESS, Color::srgb(0.25, 0.25, 0.3));
+    spawn_noise_terrain(
+        &mut commands,
+        seed.0,
+        -LEVEL_LEN/2.0,
+        250.0
+    );
 }
 
 fn spawn_platform(
@@ -180,6 +191,36 @@ fn spawn_platform(
         GlobalTransform::default(),
         Platform { width, height },
     ));
+}
+
+fn spawn_noise_terrain(
+    commands: &mut Commands,
+    seed: u64,
+    start_x: f32,
+    amplitude: f32,
+) {
+
+    let block_width = 16.0;
+
+    let chunk = sample_chunk(0, (LEVEL_LEN / block_width) as u32, seed);
+
+    let bottom_y = -300.0;
+
+    for (i, noise_value) in chunk.iter().enumerate() {
+        let surface_y = GROUND_Y + (noise_value * amplitude) + (amplitude/2.0);
+
+        let height = surface_y - bottom_y;
+        let center_y = bottom_y + height / 2.0;
+
+        spawn_platform(
+            commands,
+            start_x + i as f32 * block_width,
+            center_y,
+            block_width,
+            height,
+            Color::srgb(0.25, 0.25, 0.3),
+        );
+    }
 }
 
 fn toggle_pause(
