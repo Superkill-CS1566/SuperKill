@@ -125,7 +125,7 @@ pub struct GroundWeapon;
 // ---------------------------------------------------------------- tuning
 
 /// 6 frames of wind-up and release.
-const THROW_FRAME_TIME: f32 = 0.06;
+pub const THROW_FRAME_TIME: f32 = 0.06; // pub so throwing anim frame timing lines up
 const THROW_FRAMES: usize = 6;
 /// Zero-indexed, so 4 is the 5th frame — where the sword leaves the hand.
 const THROW_RELEASE_FRAME: usize = 4;
@@ -175,6 +175,9 @@ fn throw_or_pickup(
     for (entity, mut player, transform, controls) in &mut players {
         if !keyboard.just_pressed(controls.throw) {
             continue;
+        }
+        if player.is_crouching {
+            continue;   // can't throw when crouched
         }
 
         if player.has_weapon {
@@ -402,7 +405,7 @@ fn drop_weapon(commands: &mut Commands, assets: &WeaponAssets, x: f32) {
 
 /// Draw the sword colliders on screen. Toggled with F1, off by default.
 #[derive(Resource)]
-struct ShowHitboxes(bool);
+pub struct ShowHitboxes(pub bool);
 
 const HITBOX_DEBUG_KEY: KeyCode = KeyCode::F1;
 
@@ -413,7 +416,7 @@ fn toggle_hitbox_debug(keyboard: Res<ButtonInput<KeyCode>>, mut show: ResMut<Sho
 }
 
 // Mirrors the exact math in sword_hits, so what you see is what kills.
-fn draw_sword_hitboxes(
+pub fn draw_sword_hitboxes(
     show: Res<ShowHitboxes>,
     mut gizmos: Gizmos,
     swords: Query<(&ThrownSword, &Transform)>,
