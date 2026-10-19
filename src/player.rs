@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 
-use crate::combat::Dead;
+use crate::combat::{AttackType, Dead};
 use crate::common::{AppState, Platform, GROUND_THICKNESS, GROUND_Y, LEVEL_LEN, WIN_H};
 use crate::game::GameState;
 use crate::loading::despawn_with;
@@ -51,10 +51,15 @@ pub struct Player {
     pub is_crouching: bool,
     pub prev_crouching: bool,
     pub velocity: Vec2,
-    pub facing: f32,    // -1.0 = facing left 1.0 = facing right
+    pub facing: f32,
     pub width: f32,
     pub height: f32,
     pub crouch_height: f32,
+    pub health: u8,
+    pub max_health: u8,
+    pub attack_cooldown: Timer,
+    pub hitstun: Timer,
+    pub current_attack: Option<AttackType>,
 }
 
 const GRAVITY: f32 = 1800.0;
@@ -150,6 +155,11 @@ fn spawn_player(commands: &mut Commands, side: PlayerSide) {
             width: PLAYER_WIDTH,
             height: PLAYER_HEIGHT,
             crouch_height: CROUCH_HEIGHT,
+            health: 3,
+            max_health: 3,
+            attack_cooldown: Timer::from_seconds(0.0, TimerMode::Once),
+            hitstun: Timer::from_seconds(0.0, TimerMode::Once),
+            current_attack: None,
         },
         side,
         side.controls(),
@@ -158,10 +168,17 @@ fn spawn_player(commands: &mut Commands, side: PlayerSide) {
 
 fn player_movement(
     keyboard: Res<ButtonInput<KeyCode>>,
+    time: Res<Time>,
     mut query: Query<(&mut Player, &mut Transform, &Controls), Without<Dead>>,
 ) {
     for (mut player, mut transform, controls) in &mut query {
-        let now_crouching = keyboard.pressed(controls.crouch);
+        player.attack_cooldown.tick(time.delta());
+        player.hitstun.tick(time.delta());
+
+        let in_hitstun = !player.hitstun.is_finished();
+        let in_attack = player.current_attack.is_some();
+
+        let now_crouching = keyboard.pressed(controls.crouch) && !in_hitstun && !in_attack;
 
         if player.is_grounded {
             let half_delta = (player.height - player.crouch_height) / 2.0;
@@ -175,27 +192,34 @@ fn player_movement(
         player.is_crouching = now_crouching;
 
         let mut move_dir = 0.0;
-        if keyboard.pressed(controls.left) {
-            move_dir -= 1.0;
-        }
-        if keyboard.pressed(controls.right) {
-            move_dir += 1.0;
+        if !in_hitstun {
+            if keyboard.pressed(controls.left) {
+                move_dir -= 1.0;
+            }
+            if keyboard.pressed(controls.right) {
+                move_dir += 1.0;
+            }
         }
 
-        // keep facing the last direction walked
         if move_dir != 0.0 {
             player.facing = move_dir;
         }
 
-        // 下蹲时移动速度减半
-        let speed = if player.is_crouching {
-            player.speed * 0.5
-        } else {
-            player.speed
+        let speed_mult = match player.current_attack {
+            Some(AttackType::Jumping) => 0.7,
+            Some(AttackType::Crouching) => 0.4,
+            _ => 1.0,
         };
-        player.velocity.x = move_dir * speed;
+        let crouch_mult = if player.is_crouching { 0.5 } else { 1.0 };
+        let hitstun_mult = if in_hitstun { 0.0 } else { 1.0 };
+        player.velocity.x = move_dir * player.speed * speed_mult * crouch_mult * hitstun_mult;
 
-        if keyboard.just_pressed(controls.jump) && player.is_grounded && !player.is_crouching {
+        if keyboard.just_pressed(controls.jump)
+            && player.is_grounded
+            && !player.is_crouching
+            && !in_hitstun
+            && !in_attack
+        {
             player.velocity.y = player.jump_force;
             player.is_grounded = false;
         }
