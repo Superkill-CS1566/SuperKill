@@ -55,5 +55,3 @@ pub fn sample_chunk(start: i32, range: u32, seed: u64) -> Vec<f32> {
 
     chunk
 }
-
-// create a noise struct when doing the test level
