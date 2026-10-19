@@ -30,7 +30,7 @@ async fn main() -> io::Result<()> {
         movement_x: 1.0, 
         movement_y: 0.0, 
         jump: false,
-        block: false,
+        crouch: false,
     };
 
     let input_message = ClientMessage::PlayerInput(input);
