@@ -17,6 +17,7 @@ pub enum AppState {
     InGame,   //游戏
     Loading, 
     Testing,
+    GameOver,
     ProcGenMenu,
     DFSMazeTesting,
     PNoiseTesting,

@@ -4,12 +4,14 @@ use crate::common::{AppState, Platform, GROUND_THICKNESS, GROUND_Y, LEVEL_LEN};
 use crate::combat::{Dead, Priority};
 use crate::loading::{LoadingAssets, despawn_with};
 use crate::player::{move_and_collide, Player, PlayerSide};
+use crate::weapon::{GroundWeapon, ThrownSword};
 
 pub struct GamePlugin;
 
 impl Plugin for GamePlugin {
     fn build(&self, app: &mut App) {
         app.init_state::<GameState>()
+            .insert_resource(Winner(None))
             .add_systems(Startup, load_level)
             .add_systems(OnEnter(AppState::InGame), (setup_game, setup_level))
             .add_systems(
@@ -54,6 +56,9 @@ pub struct Backgrounds(Vec<Handle<Image>>);
 #[derive(Resource)]
 pub struct CurrentScreen(usize);
 
+#[derive(Resource)]
+pub struct Winner(pub Option<PlayerSide>);
+
 
 // replaced world height/width withh WIN_H and WIN_W in common
 // GRAVITY and the player constants now live in player.rs
@@ -97,11 +102,15 @@ fn setup_level(mut commands: Commands, backgrounds: Res<Backgrounds>) {
 
 // only the fighter holding priority may cross, and only toward their own goal
 pub fn screen_transition(
+    mut commands: Commands,
     mut current: ResMut<CurrentScreen>,
     backgrounds: Res<Backgrounds>,
     priority: Res<Priority>,
     mut players: Query<(&mut Player, &mut Transform, &PlayerSide), Without<Dead>>,
     mut bg_q: Query<&mut Sprite, With<Background>>,
+    mut winner: ResMut<Winner>,
+    mut next_app_state: ResMut<NextState<AppState>>,
+    leftovers: Query<Entity, Or<(With<GroundWeapon>, With<ThrownSword>)>>,
 ) {
     // neutral — nobody advances
     let Some(holder) = priority.0 else { return; };
@@ -119,16 +128,28 @@ pub fn screen_transition(
 
     let next = if dir > 0.0 {
         if current.0 + 1 >= backgrounds.0.len() {
-            return; // outermost screen, no further
+            winner.0 = Some(holder);
+            next_app_state.set(AppState::GameOver);
+            return;
+            // outermost screen to the right - P1 wins
         }
         current.0 + 1
     } else {
         if current.0 == 0 {
+            winner.0 = Some(holder);
+            next_app_state.set(AppState::GameOver);
             return;
+            // outermost screen to the left - P2 wins
         }
         current.0 - 1
     };
     current.0 = next;
+
+    // despawn weapons left behind in old screen
+    for entity in &leftovers {
+        commands.entity(entity).despawn();
+    }
+
 
     // leader enters from behind; the other fighter appears ahead of them
     for (mut player, mut transform, side) in &mut players {

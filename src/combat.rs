@@ -53,7 +53,7 @@ pub struct Dead {
 }
 
 impl Dead {
-    fn new(killer_x: f32) -> Self {
+    pub fn new(killer_x: f32) -> Self {
         Self {
             killer_x_at_death: killer_x,
             timer: Timer::from_seconds(RESPAWN_MAX_WAIT, TimerMode::Once),
@@ -77,8 +77,10 @@ pub struct Hitbox {
     life: Timer,
 }
 
-const ATTACK_W: f32 = 55.0;
-const ATTACK_H: f32 = 24.0;
+const ATTACK_W_ARMED: f32 = 55.0;
+const ATTACK_W_UNARMED: f32 = 28.0;
+
+const ATTACK_H: f32 = 12.0;
 /// How long a swing stays out — also acts as the attack cooldown, since a
 /// fighter can't swing again while their hitbox is still alive.
 const ATTACK_DURATION: f32 = 0.18;
@@ -186,6 +188,7 @@ fn check_respawn(
         transform.translation.x = respawn_x;
         transform.translation.y = PLAYER_SPAWN_Y;
         player.velocity = Vec2::ZERO;
+        player.has_weapon = true;   
         player.is_grounded = false;
 
         commands
@@ -258,22 +261,27 @@ fn spawn_attacks(
         if hitboxes.iter().any(|h| h.owner == *side) {
             continue;
         }
+        let attack_w = if player.has_weapon{
+            ATTACK_W_ARMED
+        } else {
+            ATTACK_W_UNARMED
+        };
 
         commands.spawn((
             Sprite {
                 color: ATTACK_COLOR,
-                custom_size: Some(Vec2::new(ATTACK_W, ATTACK_H)),
+                custom_size: Some(Vec2::new(attack_w, ATTACK_H)),
                 ..default()
             },
             Transform::from_xyz(
-                transform.translation.x + player.facing * (player.width + ATTACK_W) / 2.0,
+                transform.translation.x + player.facing * (player.width + attack_w) / 2.0,
                 transform.translation.y,
                 2.0,
             ),
             GlobalTransform::default(),
             Hitbox {
                 owner: *side,
-                width: ATTACK_W,
+                width: attack_w,
                 height: ATTACK_H,
                 life: Timer::from_seconds(ATTACK_DURATION, TimerMode::Once),
             },

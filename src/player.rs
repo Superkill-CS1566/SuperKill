@@ -40,6 +40,7 @@ pub struct Controls {
     pub jump: KeyCode,
     pub crouch: KeyCode,
     pub attack: KeyCode,
+    pub throw: KeyCode,
 }
 
 // 玩家组件
@@ -55,6 +56,7 @@ pub struct Player {
     pub width: f32,
     pub height: f32,
     pub crouch_height: f32,
+    pub has_weapon: bool,
 }
 
 const GRAVITY: f32 = 1800.0;
@@ -94,6 +96,14 @@ impl PlayerSide {
         }
     }
 
+    // Label for win screen
+    pub fn label(self) -> &'static str {
+        match self {
+            PlayerSide::Left => "Player 1",
+            PlayerSide::Right => "Player 2",
+        }
+    }
+
     fn color(self) -> Color {
         match self {
             PlayerSide::Left => Color::srgb(0.2, 0.75, 0.35),
@@ -109,6 +119,7 @@ impl PlayerSide {
                 jump: KeyCode::KeyW,
                 crouch: KeyCode::KeyS,
                 attack: KeyCode::KeyG,
+                throw: KeyCode::KeyT,
             },
             PlayerSide::Right => Controls {
                 left: KeyCode::ArrowLeft,
@@ -116,6 +127,7 @@ impl PlayerSide {
                 jump: KeyCode::ArrowUp,
                 crouch: KeyCode::ArrowDown,
                 attack: KeyCode::KeyH,
+                throw: KeyCode::KeyY,
             },
         }
     }
@@ -147,6 +159,7 @@ fn spawn_player(commands: &mut Commands, side: PlayerSide) {
             prev_crouching: false,
             velocity: Vec2::ZERO,
             facing: side.advance_dir(),
+            has_weapon: true,
             width: PLAYER_WIDTH,
             height: PLAYER_HEIGHT,
             crouch_height: CROUCH_HEIGHT,
