@@ -7,16 +7,19 @@ use crate::loading::despawn_with;
 
 pub struct PlayerPlugin;
 
+/* Temporary remove from Plugin for testing
+.add_systems(
+    Update,
+    (player_movement, apply_gravity, move_and_collide)
+        .chain()
+        .run_if(in_state(AppState::InGame))
+        .run_if(in_state(GameState::Playing)),
+     )
+*/
+
 impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(OnEnter(AppState::InGame), spawn_players)
-            .add_systems(
-                Update,
-                (player_movement, apply_gravity, move_and_collide)
-                    .chain()
-                    .run_if(in_state(AppState::InGame))
-                    .run_if(in_state(GameState::Playing)),
-            )
             .add_systems(
                 Update,
                 update_player_visual.run_if(in_state(AppState::InGame)),
