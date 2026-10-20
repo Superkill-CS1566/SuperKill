@@ -78,10 +78,15 @@ pub struct Hitbox {
     is_attack: bool,
 }
 
+const ATTACK_H: f32 = 24.0;
+const BLOCK_W: f32 = 25.0;
+const BLOCK_H: f32 = 52.0;
+
+/// How long a swing/block stays out — also acts as the attack cooldown, since a
 const ATTACK_W_ARMED: f32 = 55.0;
 const ATTACK_W_UNARMED: f32 = 28.0;
 
-const ATTACK_H: f32 = 12.0;
+//const ATTACK_H: f32 = 12.0;
 /// How long a swing stays out — also acts as the attack cooldown, since a
 /// fighter can't swing again while their hitbox is still alive.
 const ATTACK_DURATION: f32 = 0.18;
