@@ -24,7 +24,7 @@ impl Plugin for CameraPlugin {
     }
 }
 
-pub const ZOOM: f32 = 0.5; // 0.5 = 2× zoomed in
+pub const ZOOM: f32 = 0.80; // 0.5 = 2× zoomed in
 /// Width of the visible world at this zoom.
 pub const SCREEN_W: f32 = WIN_W * ZOOM;
 
@@ -32,7 +32,6 @@ pub const SCREEN_W: f32 = WIN_W * ZOOM;
 const LOOKAHEAD: f32 = 160.0;
 /// How close to the view edge the leader may be pushed in midpoint mode.
 const CAGE_MARGIN: f32 = 80.0;
-const CAMERA_Y: f32 = -150.0;
 
 pub fn init_camera_zoom(mut camera: Single<&mut Projection, With<UiCamera>>) {
     if let Projection::Orthographic(ref mut ortho) = **camera {
@@ -82,5 +81,4 @@ pub fn camera_follow(
     };
 
     camera.translation.x = target.clamp(-bound, bound);
-    camera.translation.y = CAMERA_Y;
 }

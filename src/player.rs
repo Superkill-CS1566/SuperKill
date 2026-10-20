@@ -1,12 +1,9 @@
 use bevy::prelude::*;
-use bevy::sprite::Anchor;
 
 use crate::combat::{AttackType, Dead};
 use crate::common::{AppState, Platform, GROUND_THICKNESS, GROUND_Y, LEVEL_LEN, WIN_H};
 use crate::game::GameState;
 use crate::loading::despawn_with;
-use crate::animation::{PlayerAnim, PlayerSheets, PLAYER_SPRITE_H, PLAYER_SPRITE_W};
-use crate::weapon::ShowHitboxes;
 
 pub struct PlayerPlugin;
 
@@ -25,14 +22,7 @@ impl Plugin for PlayerPlugin {
         app.add_systems(OnEnter(AppState::InGame), spawn_players)
             .add_systems(
                 Update,
-                (player_movement, apply_gravity, move_and_collide, align_player_sprite)
-                    .chain()
-                    .run_if(in_state(AppState::InGame))
-                    .run_if(in_state(GameState::Playing)),
-            )
-            .add_systems(
-                Update,
-                draw_player_hitboxes.run_if(in_state(AppState::InGame)),
+                update_player_visual.run_if(in_state(AppState::InGame)),
             )
             .add_systems(OnExit(AppState::InGame), despawn_with::<Player>);
     }
@@ -53,7 +43,6 @@ pub struct Controls {
     pub jump: KeyCode,
     pub crouch: KeyCode,
     pub attack: KeyCode,
-    pub throw: KeyCode,
     pub block: KeyCode,
 }
 
@@ -70,12 +59,6 @@ pub struct Player {
     pub width: f32,
     pub height: f32,
     pub crouch_height: f32,
-    pub health: u8,
-    pub max_health: u8,
-    pub attack_cooldown: Timer,
-    pub hitstun: Timer,
-    pub current_attack: Option<AttackType>,
-    pub has_weapon: bool,
     pub is_blocking: bool,
     pub block_cooldown: Timer
 }
@@ -84,8 +67,8 @@ const GRAVITY: f32 = 1800.0;
 const TERMINAL_VELOCITY: f32 = -1200.0;
 
 // Player Constants
-const PLAYER_WIDTH: f32 = 30.0;
-const PLAYER_HEIGHT: f32 = 95.0;
+const PLAYER_WIDTH: f32 = 40.0;
+const PLAYER_HEIGHT: f32 = 60.0;
 const CROUCH_HEIGHT: f32 = 35.0;
 const PLAYER_SPEED: f32 = 320.0;
 const JUMP_FORCE: f32 = 620.0;
@@ -120,11 +103,10 @@ impl PlayerSide {
         }
     }
 
-    // Label for win screen
-    pub fn label(self) -> &'static str {
+    fn color(self) -> Color {
         match self {
-            PlayerSide::Left => "Player 1",
-            PlayerSide::Right => "Player 2",
+            PlayerSide::Left => Color::srgb(0.2, 0.75, 0.35),
+            PlayerSide::Right => Color::srgb(0.35, 0.2, 0.75),
         }
     }
 
@@ -136,7 +118,6 @@ impl PlayerSide {
                 jump: KeyCode::KeyW,
                 crouch: KeyCode::KeyS,
                 attack: KeyCode::KeyG,
-                throw: KeyCode::KeyT,
                 block: KeyCode::KeyB,
             },
             PlayerSide::Right => Controls {
@@ -145,30 +126,25 @@ impl PlayerSide {
                 jump: KeyCode::ArrowUp,
                 crouch: KeyCode::ArrowDown,
                 attack: KeyCode::KeyH,
-                throw: KeyCode::KeyY,
                 block: KeyCode::KeyN,
             },
         }
     }
 }
 
-fn spawn_players(mut commands: Commands, sheets: Res<PlayerSheets>) {
+fn spawn_players(mut commands: Commands) {
     for side in [PlayerSide::Left, PlayerSide::Right] {
-        spawn_player(&mut commands, &sheets, side);
+        spawn_player(&mut commands, side);
     }
 }
 
-fn spawn_player(commands: &mut Commands, sheets: &PlayerSheets, side: PlayerSide) {
-    let (image, atlas) = PlayerAnim::starting_sheet(sheets);
-
+fn spawn_player(commands: &mut Commands, side: PlayerSide) {
     commands.spawn((
         Sprite {
-            image,
-            texture_atlas: Some(atlas),
-            custom_size: Some(Vec2::new(PLAYER_SPRITE_W, PLAYER_SPRITE_H)),
+            color: side.color(),
+            custom_size: Some(Vec2::new(PLAYER_WIDTH, PLAYER_HEIGHT)),
             ..default()
         },
-        Anchor::CENTER,
         Transform {
             translation: Vec3::new(side.spawn_x(), PLAYER_SPAWN_Y, 1.0),
             ..default()
@@ -182,7 +158,6 @@ fn spawn_player(commands: &mut Commands, sheets: &PlayerSheets, side: PlayerSide
             prev_crouching: false,
             velocity: Vec2::ZERO,
             facing: side.advance_dir(),
-            has_weapon: true,
             width: PLAYER_WIDTH,
             height: PLAYER_HEIGHT,
             crouch_height: CROUCH_HEIGHT,
@@ -196,7 +171,6 @@ fn spawn_player(commands: &mut Commands, sheets: &PlayerSheets, side: PlayerSide
         },
         side,
         side.controls(),
-        PlayerAnim::new(),
     ));
 }
 
@@ -206,29 +180,19 @@ fn player_movement(
     mut query: Query<(&mut Player, &mut Transform, &Controls), Without<Dead>>,
 ) {
     for (mut player, mut transform, controls) in &mut query {
-        player.attack_cooldown.tick(time.delta());
-        player.hitstun.tick(time.delta());
-
-        let in_hitstun = !player.hitstun.is_finished();
-        let in_attack = player.current_attack.is_some();
-
-        let now_crouching = keyboard.pressed(controls.crouch) && !in_hitstun && !in_attack;
-        //let now_crouching = keyboard.pressed(controls.crouch);
+        let now_crouching = keyboard.pressed(controls.crouch);
+        player.block_cooldown.tick(time.delta());
 
         if player.is_grounded {
-            
             let half_delta = (player.height - player.crouch_height) / 2.0;
             if player.prev_crouching && !now_crouching {
                 transform.translation.y += half_delta;
             } else if !player.prev_crouching && now_crouching {
                 transform.translation.y -= half_delta;
             }
-
-            player.prev_crouching = now_crouching;
-            player.is_crouching = now_crouching;
         }
-        // player.prev_crouching = now_crouching;
-        // player.is_crouching = now_crouching;
+        player.prev_crouching = now_crouching;
+        player.is_crouching = now_crouching;
 
         let mut move_dir = 0.0;
         if !in_hitstun {
@@ -351,47 +315,15 @@ pub fn move_and_collide(
     }
 }
 
-// Draws the player collision box. Toggled with F1 — see ShowHitboxes in
-// weapon.rs. Mirrors the math in move_and_collide, so what you see is what
-// actually collides.
-fn draw_player_hitboxes(
-    show: Res<ShowHitboxes>,
-    mut gizmos: Gizmos,
-    players: Query<(&Player, &Transform), Without<Dead>>,
-) {
-    if !show.0 {
-        return;
-    }
-
-    for (player, transform) in &players {
-        let height = if player.is_crouching {
+fn update_player_visual(mut query: Query<(&Player, &mut Sprite), Without<Dead>>) {
+    for (player, mut sprite) in &mut query {
+        let target_h = if player.is_crouching {
             player.crouch_height
         } else {
             player.height
         };
-
-        gizmos.rect_2d(
-            transform.translation.truncate(),
-            Vec2::new(player.width, height),
-            Color::srgb(0.2, 0.8, 1.0),
-        );
-    }
-}
-
-// tune this to place sprite feet at platform
-const SPRITE_ANCHOR_Y: f32 = 0.0;
-
-// keeps sprite animation in line when crouching
-fn align_player_sprite(mut players: Query<(&Player, &mut Anchor)>) {
-    for (player, mut anchor) in &mut players {
-        let crouch_shift = if player.is_crouching {
-            (player.height - player.crouch_height) / 2.0
-        } else {
-            0.0
-        };
-        *anchor = Anchor(Vec2::new(
-            0.0,
-            SPRITE_ANCHOR_Y - crouch_shift / PLAYER_SPRITE_H,
-        ));
+        if let Some(size) = &mut sprite.custom_size {
+            size.y = target_h;
+        }
     }
 }

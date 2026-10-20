@@ -17,9 +17,6 @@ mod recursive_generation;
 mod recursive_test;
 mod settings;
 mod test;
-mod game_over;
-mod weapon;
-mod animation;
 mod simplerng;
 
 use bevy::{prelude::*, window::{EnabledButtons, PresentMode}};
@@ -33,9 +30,7 @@ use crate::procedural_test::ProceduralTestPlugin;
 use crate::perlin_noise_test::PerlinNoiseTestPlugin;
 use crate::procedural_gen_menu::ProcGenPlugin;
 use crate::recursive_test::RecursiveTestPlugin;
-use crate::game_over::GameOverPlugin;
-use crate::weapon::WeaponPlugin;
-use crate::animation::AnimationPlugin;
+
 
 fn main() {
     App::new()
@@ -54,9 +49,9 @@ fn main() {
         }))
         .init_state::<AppState>()
         // changed this to just add the plugins
-        .add_plugins((MainMenuPlugin, CreditsPlugin, SettingsPlugin, TestPlugin, LoadingPlugin, NetworkPlugin))
+        .add_plugins((MainMenuPlugin, CreditsPlugin, SettingsPlugin, TestPlugin, LoadingPlugin))
         // in-game: level + fighters + camera + combat
-        .add_plugins((GamePlugin, PlayerPlugin, CameraPlugin, CombatPlugin, GameOverPlugin, WeaponPlugin, AnimationPlugin))
+        .add_plugins((GamePlugin, PlayerPlugin, CameraPlugin, CombatPlugin, NetworkPlugin))
         .add_plugins(ProceduralTestPlugin)
         .add_plugins(PerlinNoiseTestPlugin)
         .add_plugins(ProcGenPlugin)
