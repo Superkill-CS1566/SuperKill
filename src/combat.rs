@@ -53,7 +53,7 @@ pub struct Dead {
 }
 
 impl Dead {
-    fn new(killer_x: f32) -> Self {
+    pub fn new(killer_x: f32) -> Self {
         Self {
             killer_x_at_death: killer_x,
             timer: Timer::from_seconds(RESPAWN_MAX_WAIT, TimerMode::Once),
@@ -78,11 +78,11 @@ pub struct Hitbox {
     is_attack: bool,
 }
 
-const ATTACK_W: f32 = 55.0;
-const ATTACK_H: f32 = 24.0;
-const BLOCK_W: f32 = 25.0;
-const BLOCK_H: f32 = 52.0;
-/// How long a swing/block stays out — also acts as the attack cooldown, since a
+const ATTACK_W_ARMED: f32 = 55.0;
+const ATTACK_W_UNARMED: f32 = 28.0;
+
+const ATTACK_H: f32 = 12.0;
+/// How long a swing stays out — also acts as the attack cooldown, since a
 /// fighter can't swing again while their hitbox is still alive.
 const ATTACK_DURATION: f32 = 0.18;
 const BLOCK_DURATION: f32 = 1.00;
@@ -162,7 +162,13 @@ fn check_respawn(
 
         let respawn_x = match priority.0 {
             // neutral — both went down, everyone back to their starting marks
-            None => side.spawn_x(),
+            None => {
+                if !waited_long_enough {
+                    continue;
+                }
+
+                side.spawn_x()
+            }
             Some(holder) => {
                 // where the fighter holding priority is standing
                 let mut holder_x = None;
@@ -171,26 +177,38 @@ fn check_respawn(
                         holder_x = Some(transform.translation.x);
                     }
                 }
-                let Some(holder_x) = holder_x else {
-                    continue;
-                };
+                match holder_x {
+                    // the holder is down too, so there is no leader to wait
+                    // for — come back on our own mark rather than deadlocking
+                    None => {
+                        if !waited_long_enough {
+                            continue;
+                        }
+                        side.spawn_x()
+                    },
+                    Some(holder_x) => {
+                        let dir = holder.advance_dir();
+                        let advanced = (holder_x - dead_info.killer_x_at_death) * dir;
 
-                let dir = holder.advance_dir();
-                let advanced = (holder_x - dead_info.killer_x_at_death) * dir;
-
-                // positions reset on a screen change, so the distance check is
-                // only meaningful within one screen
-                if !screen_changed && !waited_long_enough && advanced < RESPAWN_ADVANCE {
-                    continue;
+                        // positions reset on a screen change, so the distance
+                        // check is only meaningful within one screen
+                        if !screen_changed
+                            && !waited_long_enough
+                            && advanced < RESPAWN_ADVANCE
+                        {
+                            continue;
+                        }
+                        // appear at the edge the leader is pushing toward
+                        camera.translation.x + (half_view - RESPAWN_INSET) * dir
+                    }
                 }
-                // appear at the edge the leader is pushing toward
-                camera.translation.x + (half_view - RESPAWN_INSET) * dir
             }
         };
 
         transform.translation.x = respawn_x;
         transform.translation.y = PLAYER_SPAWN_Y;
         player.velocity = Vec2::ZERO;
+        player.has_weapon = true;   
         player.is_grounded = false;
 
         commands
@@ -263,22 +281,27 @@ fn spawn_attacks(
         if hitboxes.iter().any(|h| h.owner == *side) {
             continue;
         }
+        let attack_w = if player.has_weapon{
+            ATTACK_W_ARMED
+        } else {
+            ATTACK_W_UNARMED
+        };
 
         commands.spawn((
             Sprite {
                 color: ATTACK_COLOR,
-                custom_size: Some(Vec2::new(ATTACK_W, ATTACK_H)),
+                custom_size: Some(Vec2::new(attack_w, ATTACK_H)),
                 ..default()
             },
             Transform::from_xyz(
-                transform.translation.x + player.facing * (player.width + ATTACK_W) / 2.0,
+                transform.translation.x + player.facing * (player.width + attack_w) / 2.0,
                 transform.translation.y,
                 2.0,
             ),
             GlobalTransform::default(),
             Hitbox {
                 owner: *side,
-                width: ATTACK_W,
+                width: attack_w,
                 height: ATTACK_H,
                 life: Timer::from_seconds(ATTACK_DURATION, TimerMode::Once),
                 is_attack: true,
@@ -378,6 +401,9 @@ fn hitbox_hits(
     hitboxes: Query<(&Hitbox, &Transform)>,
     mut players: Query<(Entity, &mut Player, &Transform, &PlayerSide), Without<Dead>>,
 ) {
+    let mut killed: Vec<PlayerSide> = Vec::new();
+    let mut last_killer: Option<PlayerSide> = None;
+
     for (hitbox, hb_transform) in &hitboxes {
         if !hitbox.is_attack {
             continue;
@@ -434,8 +460,17 @@ fn hitbox_hits(
                 commands
                     .entity(entity)
                     .insert((Dead::new(attacker_x), Visibility::Hidden));
-                priority.0 = Some(hitbox.owner);
+                if !killed.contains(side) {
+                    killed.push(*side);
+                }
+                last_killer = Some(hitbox.owner);
             }
         }
+    }
+    // a trade leaves nobody in charge; the camera relocks to centre
+    if killed.len() >= 2 {
+        priority.0 = None;
+    } else if let Some(killer) = last_killer {
+        priority.0 = Some(killer);
     }
 }
