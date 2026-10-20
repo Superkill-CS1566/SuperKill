@@ -182,18 +182,23 @@ fn player_movement(
     mut query: Query<(&mut Player, &mut Transform, &Controls), Without<Dead>>,
 ) {
     for (mut player, mut transform, controls) in &mut query {
-        let now_crouching = keyboard.pressed(controls.crouch);
+        //let now_crouching = keyboard.pressed(controls.crouch);
 
         if player.is_grounded {
+            let now_crouching = keyboard.pressed(controls.crouch);
+            
             let half_delta = (player.height - player.crouch_height) / 2.0;
             if player.prev_crouching && !now_crouching {
                 transform.translation.y += half_delta;
             } else if !player.prev_crouching && now_crouching {
                 transform.translation.y -= half_delta;
             }
+
+            player.prev_crouching = now_crouching;
+            player.is_crouching = now_crouching;
         }
-        player.prev_crouching = now_crouching;
-        player.is_crouching = now_crouching;
+        // player.prev_crouching = now_crouching;
+        // player.is_crouching = now_crouching;
 
         let mut move_dir = 0.0;
         if keyboard.pressed(controls.left) {

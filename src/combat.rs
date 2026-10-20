@@ -159,7 +159,13 @@ fn check_respawn(
 
         let respawn_x = match priority.0 {
             // neutral — both went down, everyone back to their starting marks
-            None => side.spawn_x(),
+            None => {
+                if !waited_long_enough {
+                    continue;
+                }
+
+                side.spawn_x()
+            }
             Some(holder) => {
                 // where the fighter holding priority is standing
                 let mut holder_x = None;
@@ -168,20 +174,31 @@ fn check_respawn(
                         holder_x = Some(transform.translation.x);
                     }
                 }
-                let Some(holder_x) = holder_x else {
-                    continue;
-                };
+                match holder_x {
+                    // the holder is down too, so there is no leader to wait
+                    // for — come back on our own mark rather than deadlocking
+                    None => {
+                        if !waited_long_enough {
+                            continue;
+                        }
+                        side.spawn_x()
+                    },
+                    Some(holder_x) => {
+                        let dir = holder.advance_dir();
+                        let advanced = (holder_x - dead_info.killer_x_at_death) * dir;
 
-                let dir = holder.advance_dir();
-                let advanced = (holder_x - dead_info.killer_x_at_death) * dir;
-
-                // positions reset on a screen change, so the distance check is
-                // only meaningful within one screen
-                if !screen_changed && !waited_long_enough && advanced < RESPAWN_ADVANCE {
-                    continue;
+                        // positions reset on a screen change, so the distance
+                        // check is only meaningful within one screen
+                        if !screen_changed
+                            && !waited_long_enough
+                            && advanced < RESPAWN_ADVANCE
+                        {
+                            continue;
+                        }
+                        // appear at the edge the leader is pushing toward
+                        camera.translation.x + (half_view - RESPAWN_INSET) * dir
+                    }
                 }
-                // appear at the edge the leader is pushing toward
-                camera.translation.x + (half_view - RESPAWN_INSET) * dir
             }
         };
 
@@ -332,6 +349,9 @@ fn hitbox_hits(
     hitboxes: Query<(&Hitbox, &Transform)>,
     players: Query<(Entity, &Player, &Transform, &PlayerSide), Without<Dead>>,
 ) {
+    let mut killed: Vec<PlayerSide> = Vec::new();
+    let mut last_killer: Option<PlayerSide> = None;
+
     for (hitbox, hb_transform) in &hitboxes {
         // where the attacker stands, for the respawn-distance check
         let mut attacker_x = None;
@@ -373,8 +393,17 @@ fn hitbox_hits(
                 commands
                     .entity(entity)
                     .insert((Dead::new(attacker_x), Visibility::Hidden));
-                priority.0 = Some(hitbox.owner);
+                if !killed.contains(side) {
+                    killed.push(*side);
+                }
+                last_killer = Some(hitbox.owner);
             }
         }
+    }
+    // a trade leaves nobody in charge; the camera relocks to centre
+    if killed.len() >= 2 {
+        priority.0 = None;
+    } else if let Some(killer) = last_killer {
+        priority.0 = Some(killer);
     }
 }
