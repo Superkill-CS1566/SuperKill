@@ -1,12 +1,11 @@
 use bevy::prelude::*;
 
-use crate::common::{AppState, Platform, GROUND_THICKNESS, GROUND_Y, LEVEL_LEN};
+use crate::common::{AppState, Platform, GROUND_Y, LEVEL_LEN};
 use crate::combat::{Dead, Priority};
 use crate::loading::{LoadingAssets, despawn_with};
 use crate::player::{move_and_collide, Player, PlayerSide};
 use crate::weapon::{GroundWeapon, ThrownSword};
 use crate::perlin_noise::sample_chunk;
-use crate::simplerng::SimpleRng;
 
 pub struct GamePlugin;
 

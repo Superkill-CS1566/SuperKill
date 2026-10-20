@@ -128,13 +128,6 @@ impl PlayerSide {
         }
     }
 
-    fn color(self) -> Color {
-        match self {
-            PlayerSide::Left => Color::srgb(0.2, 0.75, 0.35),
-            PlayerSide::Right => Color::srgb(0.35, 0.2, 0.75),
-        }
-    }
-
     fn controls(self) -> Controls {
         match self {
             PlayerSide::Left => Controls {
@@ -223,7 +216,6 @@ fn player_movement(
         //let now_crouching = keyboard.pressed(controls.crouch);
 
         if player.is_grounded {
-            let now_crouching = keyboard.pressed(controls.crouch);
             
             let half_delta = (player.height - player.crouch_height) / 2.0;
             if player.prev_crouching && !now_crouching {

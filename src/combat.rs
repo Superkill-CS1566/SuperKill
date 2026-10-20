@@ -21,7 +21,7 @@ impl Plugin for CombatPlugin {
             )
             .add_systems(
                 Update,
-                (spawn_attacks, update_hitboxes, hitbox_hits, update_attack_state, spawn_blocking,)
+                (spawn_attacks, spawn_blocking, update_hitboxes, hitbox_hits, update_attack_state)
                     .chain()
                     .run_if(in_state(AppState::InGame))
                     .run_if(in_state(GameState::Playing)),
@@ -75,23 +75,21 @@ pub struct Hitbox {
     attack_type: AttackType,
     damage: u8,
     has_hit: bool,
-}
-
     is_attack: bool,
 }
 
-const ATTACK_H: f32 = 24.0;
+//const ATTACK_H: f32 = 24.0;
 const BLOCK_W: f32 = 25.0;
 const BLOCK_H: f32 = 52.0;
 
 /// How long a swing/block stays out — also acts as the attack cooldown, since a
-const ATTACK_W_ARMED: f32 = 55.0;
-const ATTACK_W_UNARMED: f32 = 28.0;
+//const ATTACK_W_ARMED: f32 = 55.0;
+//const ATTACK_W_UNARMED: f32 = 28.0;
 
 //const ATTACK_H: f32 = 12.0;
 /// How long a swing stays out — also acts as the attack cooldown, since a
 /// fighter can't swing again while their hitbox is still alive.
-const ATTACK_DURATION: f32 = 0.18;
+//const ATTACK_DURATION: f32 = 0.18;
 const BLOCK_DURATION: f32 = 1.00;
 const ATTACK_COLOR: Color = Color::srgb(0.9, 0.15, 0.15);
 const BLOCK_COLOR: Color = Color::srgb(0.2, 0.2, 1.0);
@@ -243,8 +241,11 @@ fn check_respawn(
         player.is_grounded = false;
         player.health = player.max_health;
         player.attack_cooldown = Timer::from_seconds(0.0, TimerMode::Once);
+        player.block_cooldown.tick(time.delta());
+        player.is_blocking = false;
         player.hitstun = Timer::from_seconds(0.0, TimerMode::Once);
         player.current_attack = None;
+        
 
         commands
             .entity(entity)
@@ -318,14 +319,17 @@ fn spawn_attacks(
         if !player.hitstun.is_finished() {
             continue;
         }
+        if player.is_blocking {
+            continue;
+        }
         if hitboxes.iter().any(|h| h.owner == *side) {
             continue;
         }
-        let attack_w = if player.has_weapon{
+        /*let attack_w = if player.has_weapon{
             ATTACK_W_ARMED
         } else {
             ATTACK_W_UNARMED
-        };
+        };*/
 
         let ground_y = PLAYER_SPAWN_Y;
         let height_above_ground = transform.translation.y - ground_y;
@@ -388,7 +392,54 @@ fn spawn_attacks(
                 attack_type,
                 damage,
                 has_hit: false,
-                is_attach: true,
+                is_attack: true,
+            },
+        ));
+    }
+}
+
+fn spawn_blocking(
+    mut commands: Commands,
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut players: Query<(&mut Player, &Transform, &PlayerSide, &Controls), Without<Dead>>,
+    hitboxes: Query<&Hitbox>,
+) {
+    for (mut player, transform, side, controls) in &mut players {
+        if !keyboard.just_pressed(controls.block) {
+            continue;
+        }
+        // one block at a time
+        if hitboxes.iter().any(|h| h.owner == *side) {
+            continue;
+        }
+        if !player.block_cooldown.is_finished() {
+            continue;
+        }
+        if player.current_attack.is_some() || !player.hitstun.is_finished() {
+            continue;
+        }
+
+        commands.spawn((
+            Sprite {
+                color: BLOCK_COLOR,
+                custom_size: Some(Vec2::new(BLOCK_W, BLOCK_H)),
+                ..default()
+            },
+            Transform::from_xyz(
+                transform.translation.x + player.facing * (player.width + BLOCK_W) / 2.0,
+                transform.translation.y,
+                2.0,
+            ),
+            GlobalTransform::default(),
+            Hitbox {
+                owner: *side,
+                width: BLOCK_W,
+                height: BLOCK_H,
+                life: Timer::from_seconds(BLOCK_DURATION, TimerMode::Once),
+                attack_type: AttackType::Standing, // placeholder; ignored for blocks
+                damage: 0,
+                has_hit: false,
+                is_attack: false,
             },
         ));
         player.is_blocking = true;
@@ -407,7 +458,7 @@ fn update_hitboxes(
             for (mut player, _transform, side) in &mut players {
                 if *side == hitbox.owner && player.is_blocking {
                     player.is_blocking = false;
-                    player.block_cooldown = Timer::from_seconds(2.00, TimerMode::Once)
+                    player.block_cooldown = Timer::from_seconds(2.00, TimerMode::Once);
                 }
             }
             commands.entity(entity).despawn();
@@ -421,10 +472,14 @@ fn update_hitboxes(
             }
         }
 
-        let y_offset = match hitbox.attack_type {
-            AttackType::Standing => STAND_Y_OFFSET,
-            AttackType::Jumping => JUMP_Y_OFFSET,
-            AttackType::Crouching => CROUCH_Y_OFFSET,
+        let y_offset = if hitbox.is_attack {
+            match hitbox.attack_type {
+                AttackType::Standing => STAND_Y_OFFSET,
+                AttackType::Jumping => JUMP_Y_OFFSET,
+                AttackType::Crouching => CROUCH_Y_OFFSET,
+            }
+        } else {
+            0.0
         };
 
         match owner {
@@ -458,14 +513,14 @@ fn update_attack_state(
 fn hitbox_hits(
     mut commands: Commands,
     mut priority: ResMut<Priority>,
-    hitboxes: Query<(&Hitbox, &Transform)>,
+    mut hitboxes: Query<(&mut Hitbox, &Transform)>,
     mut players: Query<(Entity, &mut Player, &Transform, &PlayerSide), Without<Dead>>,
 ) {
-    let mut killed: Vec<PlayerSide> = Vec::new();
-    let mut last_killer: Option<PlayerSide> = None;
+    let killed: Vec<PlayerSide> = Vec::new();
+    let last_killer: Option<PlayerSide> = None;
 
-    for (hitbox, hb_transform) in &hitboxes {
-        if !hitbox.is_attack {
+    for (mut hitbox, hb_transform) in &mut hitboxes {
+        if !hitbox.is_attack || hitbox.has_hit {
             continue;
         }
         // where the attacker stands, for the respawn-distance check
@@ -477,7 +532,7 @@ fn hitbox_hits(
         }
         let Some(attacker_x) = attacker_x else {
             continue;
-        }
+        };
 
         let hb_half_w = hitbox.width / 2.0;
         let hb_half_h = hitbox.height / 2.0;
@@ -522,13 +577,6 @@ fn hitbox_hits(
 
         if let Some(entity) = hit_entity {
             hitbox.has_hit = true;
-
-            let mut attacker_x = 0.0;
-            for (_, _, transform, side) in &players {
-                if *side == hitbox.owner {
-                    attacker_x = transform.translation.x;
-                }
-            }
 
             if let Ok((_, mut player, _, _)) = players.get_mut(entity) {
                 player.health = player.health.saturating_sub(hit_damage);
