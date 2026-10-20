@@ -20,6 +20,7 @@ mod test;
 mod game_over;
 mod weapon;
 mod animation;
+mod simplerng;
 
 use bevy::{prelude::*, window::{EnabledButtons, PresentMode}};
 

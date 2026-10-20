@@ -10,6 +10,16 @@ use crate::weapon::ShowHitboxes;
 
 pub struct PlayerPlugin;
 
+/* Temporary remove from Plugin for testing
+.add_systems(
+    Update,
+    (player_movement, apply_gravity, move_and_collide)
+        .chain()
+        .run_if(in_state(AppState::InGame))
+        .run_if(in_state(GameState::Playing)),
+     )
+*/
+
 impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(OnEnter(AppState::InGame), spawn_players)
@@ -44,6 +54,7 @@ pub struct Controls {
     pub crouch: KeyCode,
     pub attack: KeyCode,
     pub throw: KeyCode,
+    pub block: KeyCode,
 }
 
 // 玩家组件
@@ -60,6 +71,8 @@ pub struct Player {
     pub height: f32,
     pub crouch_height: f32,
     pub has_weapon: bool,
+    pub is_blocking: bool,
+    pub block_cooldown: Timer
 }
 
 const GRAVITY: f32 = 1800.0;
@@ -70,7 +83,10 @@ const PLAYER_WIDTH: f32 = 30.0;
 const PLAYER_HEIGHT: f32 = 95.0;
 const CROUCH_HEIGHT: f32 = 35.0;
 const PLAYER_SPEED: f32 = 320.0;
-const JUMP_FORCE: f32 = 670.0;
+const JUMP_FORCE: f32 = 620.0;
+// Because the blocking entity despawns along with its components,
+// this is a player constant
+const BLOCK_COOLDOWN: f32 = 2.00;
 
 // how far from center each fighter starts
 const SPAWN_OFFSET_X: f32 = 200.0;
@@ -123,6 +139,7 @@ impl PlayerSide {
                 crouch: KeyCode::KeyS,
                 attack: KeyCode::KeyG,
                 throw: KeyCode::KeyT,
+                block: KeyCode::KeyB,
             },
             PlayerSide::Right => Controls {
                 left: KeyCode::ArrowLeft,
@@ -131,6 +148,7 @@ impl PlayerSide {
                 crouch: KeyCode::ArrowDown,
                 attack: KeyCode::KeyH,
                 throw: KeyCode::KeyY,
+                block: KeyCode::KeyN,
             },
         }
     }
@@ -170,6 +188,8 @@ fn spawn_player(commands: &mut Commands, sheets: &PlayerSheets, side: PlayerSide
             width: PLAYER_WIDTH,
             height: PLAYER_HEIGHT,
             crouch_height: CROUCH_HEIGHT,
+            is_blocking: false,
+            block_cooldown: Timer::from_seconds(BLOCK_COOLDOWN, TimerMode::Once),
         },
         side,
         side.controls(),
@@ -179,6 +199,7 @@ fn spawn_player(commands: &mut Commands, sheets: &PlayerSheets, side: PlayerSide
 
 fn player_movement(
     keyboard: Res<ButtonInput<KeyCode>>,
+    time: Res<Time>,
     mut query: Query<(&mut Player, &mut Transform, &Controls), Without<Dead>>,
 ) {
     for (mut player, mut transform, controls) in &mut query {
