@@ -40,6 +40,7 @@ pub struct Controls {
     pub jump: KeyCode,
     pub crouch: KeyCode,
     pub attack: KeyCode,
+    pub block: KeyCode,
 }
 
 // 玩家组件
@@ -55,6 +56,8 @@ pub struct Player {
     pub width: f32,
     pub height: f32,
     pub crouch_height: f32,
+    pub is_blocking: bool,
+    pub block_cooldown: Timer
 }
 
 const GRAVITY: f32 = 1800.0;
@@ -66,6 +69,9 @@ const PLAYER_HEIGHT: f32 = 60.0;
 const CROUCH_HEIGHT: f32 = 35.0;
 const PLAYER_SPEED: f32 = 320.0;
 const JUMP_FORCE: f32 = 620.0;
+// Because the blocking entity despawns along with its components,
+// this is a player constant
+const BLOCK_COOLDOWN: f32 = 2.00;
 
 // how far from center each fighter starts
 const SPAWN_OFFSET_X: f32 = 200.0;
@@ -109,6 +115,7 @@ impl PlayerSide {
                 jump: KeyCode::KeyW,
                 crouch: KeyCode::KeyS,
                 attack: KeyCode::KeyG,
+                block: KeyCode::KeyB,
             },
             PlayerSide::Right => Controls {
                 left: KeyCode::ArrowLeft,
@@ -116,6 +123,7 @@ impl PlayerSide {
                 jump: KeyCode::ArrowUp,
                 crouch: KeyCode::ArrowDown,
                 attack: KeyCode::KeyH,
+                block: KeyCode::KeyN,
             },
         }
     }
@@ -150,6 +158,8 @@ fn spawn_player(commands: &mut Commands, side: PlayerSide) {
             width: PLAYER_WIDTH,
             height: PLAYER_HEIGHT,
             crouch_height: CROUCH_HEIGHT,
+            is_blocking: false,
+            block_cooldown: Timer::from_seconds(BLOCK_COOLDOWN, TimerMode::Once),
         },
         side,
         side.controls(),
@@ -158,10 +168,12 @@ fn spawn_player(commands: &mut Commands, side: PlayerSide) {
 
 fn player_movement(
     keyboard: Res<ButtonInput<KeyCode>>,
+    time: Res<Time>,
     mut query: Query<(&mut Player, &mut Transform, &Controls), Without<Dead>>,
 ) {
     for (mut player, mut transform, controls) in &mut query {
         let now_crouching = keyboard.pressed(controls.crouch);
+        player.block_cooldown.tick(time.delta());
 
         if player.is_grounded {
             let half_delta = (player.height - player.crouch_height) / 2.0;
