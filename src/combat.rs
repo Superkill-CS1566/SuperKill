@@ -21,7 +21,7 @@ impl Plugin for CombatPlugin {
             )
             .add_systems(
                 Update,
-                (spawn_attacks, update_hitboxes, hitbox_hits, update_attack_state)
+                (spawn_attacks, update_hitboxes, hitbox_hits, update_attack_state, spawn_blocking,)
                     .chain()
                     .run_if(in_state(AppState::InGame))
                     .run_if(in_state(GameState::Playing)),
@@ -47,7 +47,7 @@ pub struct Dead {
 }
 
 impl Dead {
-    fn new(killer_x: f32) -> Self {
+    pub fn new(killer_x: f32) -> Self {
         Self {
             killer_x_at_death: killer_x,
             timer: Timer::from_seconds(RESPAWN_MAX_WAIT, TimerMode::Once),
@@ -77,7 +77,24 @@ pub struct Hitbox {
     has_hit: bool,
 }
 
+    is_attack: bool,
+}
+
+const ATTACK_H: f32 = 24.0;
+const BLOCK_W: f32 = 25.0;
+const BLOCK_H: f32 = 52.0;
+
+/// How long a swing/block stays out — also acts as the attack cooldown, since a
+const ATTACK_W_ARMED: f32 = 55.0;
+const ATTACK_W_UNARMED: f32 = 28.0;
+
+//const ATTACK_H: f32 = 12.0;
+/// How long a swing stays out — also acts as the attack cooldown, since a
+/// fighter can't swing again while their hitbox is still alive.
+const ATTACK_DURATION: f32 = 0.18;
+const BLOCK_DURATION: f32 = 1.00;
 const ATTACK_COLOR: Color = Color::srgb(0.9, 0.15, 0.15);
+const BLOCK_COLOR: Color = Color::srgb(0.2, 0.2, 1.0);
 
 const STAND_DAMAGE: u8 = 1;
 const STAND_DURATION: f32 = 0.18;
@@ -176,7 +193,13 @@ fn check_respawn(
 
         let respawn_x = match priority.0 {
             // neutral — both went down, everyone back to their starting marks
-            None => side.spawn_x(),
+            None => {
+                if !waited_long_enough {
+                    continue;
+                }
+
+                side.spawn_x()
+            }
             Some(holder) => {
                 // where the fighter holding priority is standing
                 let mut holder_x = None;
@@ -185,26 +208,38 @@ fn check_respawn(
                         holder_x = Some(transform.translation.x);
                     }
                 }
-                let Some(holder_x) = holder_x else {
-                    continue;
-                };
+                match holder_x {
+                    // the holder is down too, so there is no leader to wait
+                    // for — come back on our own mark rather than deadlocking
+                    None => {
+                        if !waited_long_enough {
+                            continue;
+                        }
+                        side.spawn_x()
+                    },
+                    Some(holder_x) => {
+                        let dir = holder.advance_dir();
+                        let advanced = (holder_x - dead_info.killer_x_at_death) * dir;
 
-                let dir = holder.advance_dir();
-                let advanced = (holder_x - dead_info.killer_x_at_death) * dir;
-
-                // positions reset on a screen change, so the distance check is
-                // only meaningful within one screen
-                if !screen_changed && !waited_long_enough && advanced < RESPAWN_ADVANCE {
-                    continue;
+                        // positions reset on a screen change, so the distance
+                        // check is only meaningful within one screen
+                        if !screen_changed
+                            && !waited_long_enough
+                            && advanced < RESPAWN_ADVANCE
+                        {
+                            continue;
+                        }
+                        // appear at the edge the leader is pushing toward
+                        camera.translation.x + (half_view - RESPAWN_INSET) * dir
+                    }
                 }
-                // appear at the edge the leader is pushing toward
-                camera.translation.x + (half_view - RESPAWN_INSET) * dir
             }
         };
 
         transform.translation.x = respawn_x;
         transform.translation.y = PLAYER_SPAWN_Y;
         player.velocity = Vec2::ZERO;
+        player.has_weapon = true;   
         player.is_grounded = false;
         player.health = player.max_health;
         player.attack_cooldown = Timer::from_seconds(0.0, TimerMode::Once);
@@ -286,6 +321,11 @@ fn spawn_attacks(
         if hitboxes.iter().any(|h| h.owner == *side) {
             continue;
         }
+        let attack_w = if player.has_weapon{
+            ATTACK_W_ARMED
+        } else {
+            ATTACK_W_UNARMED
+        };
 
         let ground_y = PLAYER_SPAWN_Y;
         let height_above_ground = transform.translation.y - ground_y;
@@ -348,8 +388,10 @@ fn spawn_attacks(
                 attack_type,
                 damage,
                 has_hit: false,
+                is_attach: true,
             },
         ));
+        player.is_blocking = true;
     }
 }
 
@@ -357,11 +399,17 @@ fn update_hitboxes(
     mut commands: Commands,
     time: Res<Time>,
     mut hitboxes: Query<(Entity, &mut Hitbox, &mut Transform), Without<Player>>,
-    players: Query<(&Player, &Transform, &PlayerSide), Without<Dead>>,
+    mut players: Query<(&mut Player, &Transform, &PlayerSide), Without<Dead>>,
 ) {
     for (entity, mut hitbox, mut hb_transform) in &mut hitboxes {
         hitbox.life.tick(time.delta());
         if hitbox.life.is_finished() {
+            for (mut player, _transform, side) in &mut players {
+                if *side == hitbox.owner && player.is_blocking {
+                    player.is_blocking = false;
+                    player.block_cooldown = Timer::from_seconds(2.00, TimerMode::Once)
+                }
+            }
             commands.entity(entity).despawn();
             continue;
         }
@@ -410,11 +458,24 @@ fn update_attack_state(
 fn hitbox_hits(
     mut commands: Commands,
     mut priority: ResMut<Priority>,
-    mut hitboxes: Query<(&mut Hitbox, &Transform)>,
+    hitboxes: Query<(&Hitbox, &Transform)>,
     mut players: Query<(Entity, &mut Player, &Transform, &PlayerSide), Without<Dead>>,
 ) {
-    for (mut hitbox, hb_transform) in &mut hitboxes {
-        if hitbox.has_hit {
+    let mut killed: Vec<PlayerSide> = Vec::new();
+    let mut last_killer: Option<PlayerSide> = None;
+
+    for (hitbox, hb_transform) in &hitboxes {
+        if !hitbox.is_attack {
+            continue;
+        }
+        // where the attacker stands, for the respawn-distance check
+        let mut attacker_x = None;
+        for (_, _, transform, side) in &mut players {
+            if *side == hitbox.owner {
+                attacker_x = Some(transform.translation.x);
+            }
+        }
+        let Some(attacker_x) = attacker_x else {
             continue;
         }
 
@@ -452,7 +513,7 @@ fn hitbox_hits(
 
             if hitbox.attack_type == AttackType::Standing && player.is_crouching {
                 continue;
-            }
+          }
 
             hit_entity = Some(entity);
             hit_damage = hitbox.damage;
@@ -482,5 +543,11 @@ fn hitbox_hits(
                 }
             }
         }
+    }
+    // a trade leaves nobody in charge; the camera relocks to centre
+    if killed.len() >= 2 {
+        priority.0 = None;
+    } else if let Some(killer) = last_killer {
+        priority.0 = Some(killer);
     }
 }
