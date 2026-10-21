@@ -39,7 +39,8 @@ use crate::animation::AnimationPlugin;
 
 fn main() {
     App::new()
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
+        .add_plugins(DefaultPlugins.set(ImagePlugin::default_nearest())
+            .set(WindowPlugin {
             primary_window: Some(Window {
                 title: "SuperKill".into(),
                 resolution: (1280, 720).into(),
