@@ -61,7 +61,8 @@ pub fn rd_generate_maze(width: usize, height: usize, master_seed: u64, level: u3
     grid
 }
 
-// Helper function to determine direction of cut
+// Helper function to determine direction of cut.
+// If true, splits horizontally. Starts false
 pub fn choose_orientation(width: usize, height: usize, prev: bool) -> bool {
     if width < height {
         return true;
@@ -95,9 +96,11 @@ fn divide(grid: &mut MazeGrid, rng: &mut SimpleRng, x: usize, y: usize, width: u
         curr_y = rng.range(y, end_y, false);
         grid.set_floor(curr_x, curr_y);
         next_w = curr_x - x;
+        // Partitioning the Left Side
         divide(grid, rng, next_x, next_y, next_w, next_h, choose_orientation(next_w, next_h, is_horizon));
         next_x = curr_x + 1;
         next_w = x + width - next_x;
+        // Partitioning the Right Side
         divide(grid, rng, next_x, next_y, next_w, next_h, choose_orientation(next_w, next_h, is_horizon));
     } else if is_horizon == true {
         curr_y = y + rng.range(1, height - 2, true);
@@ -107,9 +110,11 @@ fn divide(grid: &mut MazeGrid, rng: &mut SimpleRng, x: usize, y: usize, width: u
         curr_x = rng.range(x, end_x, false);
         grid.set_floor(curr_x, curr_y);
         next_h = curr_y - y;
+        // Partitioning the Top Half
         divide(grid, rng, next_x, next_y, next_w, next_h, choose_orientation(next_w, next_h, is_horizon));
         next_y = curr_y + 1;
         next_h = y + height - next_y;
+        // Partitioning the Bottom Half
         divide(grid, rng, next_x, next_y, next_w, next_h, choose_orientation(next_w, next_h, is_horizon));
     }
 }
