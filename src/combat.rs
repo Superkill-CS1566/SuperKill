@@ -192,6 +192,12 @@ fn check_respawn(
         transform.translation.y = PLAYER_SPAWN_Y;
         player.velocity = Vec2::ZERO;
         player.is_grounded = false;
+        player.health = player.max_health;
+        player.attack_cooldown = Timer::from_seconds(0.0, TimerMode::Once);
+        player.is_blocking = false;
+        player.hitstun = Timer::from_seconds(0.0, TimerMode::Once);
+        player.current_attack = None;
+        
 
         commands
             .entity(entity)
@@ -289,11 +295,13 @@ fn spawn_attacks(
 
 fn spawn_blocking(
     mut commands: Commands,
+    time: Res<Time>,
     keyboard: Res<ButtonInput<KeyCode>>,
     mut players: Query<(&mut Player, &Transform, &PlayerSide, &Controls), Without<Dead>>,
     hitboxes: Query<&Hitbox>,
 ) {
     for (mut player, transform, side, controls) in &mut players {
+        player.block_cooldown.tick(time.delta());
         if !keyboard.just_pressed(controls.block) {
             continue;
         }
