@@ -35,7 +35,7 @@ struct RecursiveTestRoot;
 
 fn setup_maze_test(mut commands: Commands, mut seed: ResMut<MazeSeed>) {
     seed.0 = 1;
-    spawn_maze(&mut commands, seed.0);
+    spawn_maze(&mut commands, seed.0, 1);
 }
 
 fn maze_test_controls(
@@ -55,12 +55,12 @@ fn maze_test_controls(
             commands.entity(entity).despawn();
         }
         seed.0 += 1;
-        spawn_maze(&mut commands, seed.0);
+        spawn_maze(&mut commands, seed.0, 1);
     }
 }
 
-fn spawn_maze(commands: &mut Commands, seed: u64) {
-    let maze = rd_generate_maze(MAZE_WIDTH, MAZE_HEIGHT, seed);
+fn spawn_maze(commands: &mut Commands, master_seed: u64, level: u32) {
+    let maze = rd_generate_maze(MAZE_WIDTH, MAZE_HEIGHT, master_seed, level);
     let maze_center_y = -24.0;
 
     for y in 0..maze.height() {
@@ -88,7 +88,7 @@ fn spawn_maze(commands: &mut Commands, seed: u64) {
 
     commands.spawn((
         Text::new(format!(
-            "Recursive Maze   Seed: {seed}   R: Regenerate   Esc: Menu"
+            "Recursive Maze   Seed: {master_seed}   R: Regenerate   Esc: Menu"
         )),
         TextFont {
             font_size: FontSize::Px(24.0),

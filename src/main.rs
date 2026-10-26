@@ -17,6 +17,10 @@ mod recursive_generation;
 mod recursive_test;
 mod settings;
 mod test;
+mod game_over;
+mod weapon;
+mod animation;
+mod simplerng;
 
 use bevy::{prelude::*, window::{EnabledButtons, PresentMode}};
 
@@ -29,11 +33,14 @@ use crate::procedural_test::ProceduralTestPlugin;
 use crate::perlin_noise_test::PerlinNoiseTestPlugin;
 use crate::procedural_gen_menu::ProcGenPlugin;
 use crate::recursive_test::RecursiveTestPlugin;
-
+use crate::game_over::GameOverPlugin;
+use crate::weapon::WeaponPlugin;
+use crate::animation::AnimationPlugin;
 
 fn main() {
     App::new()
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
+        .add_plugins(DefaultPlugins.set(ImagePlugin::default_nearest())
+            .set(WindowPlugin {
             primary_window: Some(Window {
                 title: "SuperKill".into(),
                 resolution: (1280, 720).into(),
@@ -48,9 +55,9 @@ fn main() {
         }))
         .init_state::<AppState>()
         // changed this to just add the plugins
-        .add_plugins((MainMenuPlugin, CreditsPlugin, SettingsPlugin, TestPlugin, LoadingPlugin))
+        .add_plugins((MainMenuPlugin, CreditsPlugin, SettingsPlugin, TestPlugin, LoadingPlugin, NetworkPlugin))
         // in-game: level + fighters + camera + combat
-        .add_plugins((GamePlugin, PlayerPlugin, CameraPlugin, CombatPlugin, NetworkPlugin))
+        .add_plugins((GamePlugin, PlayerPlugin, CameraPlugin, CombatPlugin, GameOverPlugin, WeaponPlugin, AnimationPlugin))
         .add_plugins(ProceduralTestPlugin)
         .add_plugins(PerlinNoiseTestPlugin)
         .add_plugins(ProcGenPlugin)
