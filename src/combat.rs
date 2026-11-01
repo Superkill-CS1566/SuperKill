@@ -100,7 +100,7 @@ const BLOCK_H: f32 = 52.0;
 /// How long a swing stays out — also acts as the attack cooldown, since a
 /// fighter can't swing again while their hitbox is still alive.
 //const ATTACK_DURATION: f32 = 0.18;
-const BLOCK_DURATION: f32 = 1.00;
+const BLOCK_DURATION: f32 = 0.6;
 const ATTACK_COLOR: Color = Color::srgb(0.9, 0.15, 0.15);
 const ATTACK_COLOR_UNARMED: Color = Color::srgb(0.95, 0.55, 0.15);
 const BLOCK_COLOR: Color = Color::srgb(0.2, 0.2, 1.0);

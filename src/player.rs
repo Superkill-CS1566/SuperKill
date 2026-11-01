@@ -104,7 +104,7 @@ const PLAYER_SPEED: f32 = 320.0;
 const JUMP_FORCE: f32 = 620.0;
 // Because the blocking entity despawns along with its components,
 // this is a player constant
-const BLOCK_COOLDOWN: f32 = 2.00;
+const BLOCK_COOLDOWN: f32 = 1.5;
 
 // how far from center each fighter starts
 const SPAWN_OFFSET_X: f32 = 200.0;
@@ -229,6 +229,7 @@ fn player_movement(
         // landing lag from a drop locks the fighter the same way hitstun does
         let in_hitstun = player.is_stunned();
         let in_attack = player.current_attack.is_some();
+        let in_block = player.is_blocking;
 
         let now_crouching = keyboard.pressed(controls.crouch) && !in_hitstun && !in_attack;
         //let now_crouching = keyboard.pressed(controls.crouch);
@@ -249,7 +250,7 @@ fn player_movement(
         // player.is_crouching = now_crouching;
 
         let mut move_dir = 0.0;
-        if !in_hitstun {
+        if !in_hitstun && !in_block{
             if keyboard.pressed(controls.left) {
                 move_dir -= 1.0;
             }
