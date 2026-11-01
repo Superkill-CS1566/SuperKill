@@ -72,9 +72,10 @@ struct Seed(u64);
 const BG_OFFSET_Y: f32 = 65.0;
 const SCREEN_INSET: f32 = 20.0;
 const START_SCREEN: usize = 1;
+const BG_WIDTH: f32 = 1280.0;
 const BG_PATHS: &[&str] = &[
     "white_grid_inverted.png",
-    "white_grid.png",   // start screen
+    "backgrounds/hills.png",   // start screen
     "white_grid_inverted.png",
 ];
 
@@ -95,11 +96,17 @@ fn load_level(
     commands.insert_resource(Seed(1));
 }
 
-fn setup_level(mut commands: Commands, backgrounds: Res<Backgrounds>) {
+fn setup_level(
+    mut commands: Commands,
+    backgrounds: Res<Backgrounds>,
+) {
     commands.insert_resource(CurrentScreen(START_SCREEN));
     commands.spawn((
-        Sprite::from_image(backgrounds.0[START_SCREEN].clone()),
-        Transform::from_xyz(0., BG_OFFSET_Y, -1.),
+        Sprite {
+            image: backgrounds.0[START_SCREEN].clone(),
+            ..default()
+        },
+        Transform::from_xyz(0., BG_OFFSET_Y - 360., -1.),
         Background,
     ));
 }
@@ -224,7 +231,7 @@ fn spawn_noise_terrain(
 
     let chunk = sample_chunk(0, (LEVEL_LEN / block_width) as u32, seed);
 
-    let bottom_y = -300.0;
+    let bottom_y = -360.0;
 
     for (i, noise_value) in chunk.iter().enumerate() {
         let surface_y = GROUND_Y + (noise_value * amplitude) + (amplitude/2.0);
