@@ -534,7 +534,12 @@ fn update_hitboxes(
         let mut owner = None;
         for (player, p_transform, side) in &players {
             if *side == hitbox.owner {
-                owner = Some((player.facing, player.width, p_transform.translation));
+                owner = Some((
+                    player.facing,
+                    player.width,
+                    p_transform.translation,
+                    player.is_dropping,
+                ));
             }
         }
 
@@ -548,15 +553,22 @@ fn update_hitboxes(
             0.0
         };
 
+        let is_drop = hitbox.is_attack && hitbox.attack_type == AttackType::Jumping;
+
         match owner {
-            Some((facing, width, owner_pos)) => {
+            // a drop's hitbox lasts exactly as long as the drop. Checking here
+            // rather than on landing also catches one spawned on the same frame
+            // its owner touched down, which a landing check would miss
+            Some((_, _, _, false)) if is_drop => {
+                commands.entity(entity).despawn();
+            }
+            Some((facing, width, owner_pos, _)) => {
                 // must match the placement in spawn_attacks
-                hb_transform.translation.x =
-                    if hitbox.is_attack && hitbox.attack_type == AttackType::Jumping {
-                        owner_pos.x
-                    } else {
-                        owner_pos.x + facing * (width + hitbox.width) / 2.0
-                    };
+                hb_transform.translation.x = if is_drop {
+                    owner_pos.x
+                } else {
+                    owner_pos.x + facing * (width + hitbox.width) / 2.0
+                };
                 hb_transform.translation.y = owner_pos.y + y_offset;
             }
             None => {
@@ -581,26 +593,16 @@ fn update_attack_state(
     }
 }
 
-// A drop ends the moment the fighter touches down. The strike is over, and
-// they're stuck in the landing for a beat.
-fn land_drop_attack(
-    mut commands: Commands,
-    mut players: Query<(&mut Player, &PlayerSide), Without<Dead>>,
-    hitboxes: Query<(Entity, &Hitbox)>,
-) {
-    for (mut player, side) in &mut players {
+// A drop ends the moment the fighter touches down, leaving them stuck in the
+// landing for a beat. Its hitbox is cleared by update_hitboxes once it sees
+// is_dropping go false.
+fn land_drop_attack(mut players: Query<&mut Player, Without<Dead>>) {
+    for mut player in &mut players {
         if !player.is_dropping || !player.is_grounded {
             continue;
         }
         player.is_dropping = false;
         player.landing_lag = Timer::from_seconds(DROP_LANDING_LAG, TimerMode::Once);
-
-        // the hitbox only lasts until impact
-        for (entity, hitbox) in &hitboxes {
-            if hitbox.owner == *side && hitbox.attack_type == AttackType::Jumping {
-                commands.entity(entity).despawn();
-            }
-        }
     }
 }
 
@@ -612,6 +614,19 @@ fn hitbox_hits(
 ) {
     let killed: Vec<PlayerSide> = Vec::new();
     let last_killer: Option<PlayerSide> = None;
+
+    // Every active block, so an attack that runs into one stops there.
+    // Collected first because the loop below borrows the hitboxes mutably.
+    let mut blocks: Vec<(PlayerSide, Vec2, Vec2)> = Vec::new();
+    for (hitbox, transform) in &hitboxes {
+        if !hitbox.is_attack {
+            blocks.push((
+                hitbox.owner,
+                transform.translation.truncate(),
+                Vec2::new(hitbox.width / 2.0, hitbox.height / 2.0),
+            ));
+        }
+    }
 
     for (mut hitbox, hb_transform) in &mut hitboxes {
         if !hitbox.is_attack || hitbox.has_hit {
@@ -635,10 +650,37 @@ fn hitbox_hits(
 
         let mut hit_entity = None;
         let mut hit_damage = 0;
+        let mut blocked = false;
 
         for (entity, player, p_transform, side) in &players {
             if *side == hitbox.owner {
                 continue;
+            }
+
+            // A block only guards the side the fighter is facing. Without this,
+            // a swing from behind could reach through the body, touch the
+            // block on the far side, and be stopped by it.
+            let from_front = (attacker_x - p_transform.translation.x) * player.facing > 0.0;
+
+            // ran into this fighter's block — the attack is spent on it
+            let mut hits_block = false;
+            if from_front {
+                for (block_owner, block_center, block_half) in &blocks {
+                    if *block_owner != *side {
+                        continue;
+                    }
+                    if (hb_x - hb_half_w) <= block_center.x + block_half.x
+                        && (hb_x + hb_half_w) >= block_center.x - block_half.x
+                        && (hb_y - hb_half_h) <= block_center.y + block_half.y
+                        && (hb_y + hb_half_h) >= block_center.y - block_half.y
+                    {
+                        hits_block = true;
+                    }
+                }
+            }
+            if hits_block {
+                blocked = true;
+                break;
             }
 
             let p_h = if player.is_crouching {
@@ -667,6 +709,12 @@ fn hitbox_hits(
             hit_entity = Some(entity);
             hit_damage = hitbox.damage;
             break;
+        }
+
+        if blocked {
+            // connected with a block, so it can't hit anything else this swing
+            hitbox.has_hit = true;
+            continue;
         }
 
         if let Some(entity) = hit_entity {
