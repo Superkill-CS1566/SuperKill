@@ -20,6 +20,7 @@ pub struct PlayerState {
     pub position_y: f32,
     pub velocity_x: f32,
     pub velocity_y: f32,
+    pub facing: f32,
     pub grounded: bool,
     pub is_crouching: bool,
 }
@@ -37,6 +38,7 @@ impl PlayerState {
             position_y: GROUND_TOP + STANDING_HEIGHT / 2.0,
             velocity_x: 0.0,
             velocity_y: 0.0,
+            facing: if player_id == 1 { 1.0 } else { -1.0 },
             grounded: true,
             is_crouching: false,
         }
@@ -49,6 +51,10 @@ impl PlayerState {
         } else {
             0.0
         };
+
+        if direction != 0.0 {
+            self.facing = direction.signum();
+        }
 
         if self.grounded {
             self.is_crouching = input.crouch;
@@ -97,6 +103,10 @@ impl PlayerState {
             player_id: self.player_id,
             position_x: self.position_x,
             position_y: self.position_y,
+            velocity_x: self.velocity_x,
+            velocity_y: self.velocity_y,
+            is_grounded: self.grounded,
+            facing: self.facing,
             is_crouching: self.is_crouching,
         }
     }

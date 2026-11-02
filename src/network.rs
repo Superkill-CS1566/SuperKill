@@ -116,9 +116,9 @@ fn start_network_client(mut commands: Commands) {
                                     &receive_buffer[..length]
                                 ) {
                                     Ok(message) => {
-                                        println!(
-                                            "Received from {sender}: {message:?}"
-                                        );
+                                        if !matches!(&message, ServerMessage::GameState { .. }) {
+                                            println!("Received from {sender}: {message:?}");
+                                        }
 
                                         if let Err(error) = incoming_sender.try_send(message) {
                                             println!("Failed to queue server message: {error}");
@@ -217,17 +217,15 @@ fn apply_server_messages(
                         .iter()
                         .find(|snapshot| snapshot.player_id == player_id)
                     {
+                        // apply the server's movement state to this Bevy player
                         player.prev_crouching = player.is_crouching;
                         player.is_crouching = snapshot.is_crouching;
+                        player.is_grounded = snapshot.is_grounded;
+                        player.velocity = Vec2::new(snapshot.velocity_x, snapshot.velocity_y);
+                        player.facing = snapshot.facing;
 
-                        // lower the shorter sprite so its feet remain on the ground
-                        let crouch_offset = if player.is_crouching {
-                            (player.height - player.crouch_height) / 2.0
-                        } else {
-                            0.0
-                        };
                         transform.translation.x = snapshot.position_x;
-                        transform.translation.y = snapshot.position_y - crouch_offset;
+                        transform.translation.y = snapshot.position_y;
                     }
                 }
             }

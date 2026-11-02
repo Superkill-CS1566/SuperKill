@@ -6,6 +6,10 @@ pub struct PlayerSnapshot {
     pub player_id: u8, 
     pub position_x: f32, 
     pub position_y: f32,
+    pub velocity_x: f32,
+    pub velocity_y: f32, 
+    pub is_grounded: bool,
+    pub facing: f32,
     pub is_crouching: bool,
 }
 
