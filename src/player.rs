@@ -7,6 +7,7 @@ use crate::game::GameState;
 use crate::loading::despawn_with;
 use crate::animation::{PlayerAnim, PlayerSheets, PLAYER_SPRITE_H, PLAYER_SPRITE_W};
 use crate::weapon::ShowHitboxes;
+use crate::network::LocalPlayerId;
 
 pub struct PlayerPlugin;
 
@@ -20,13 +21,25 @@ pub struct PlayerPlugin;
      )
 */
 
+// run local movement only when server has not assigned a player
+fn use_local_movement(local_player: Res<LocalPlayerId>) -> bool {
+    local_player.0.is_none()
+}
+
 impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(OnEnter(AppState::InGame), spawn_players)
             .add_systems(
                 Update,
-                (player_movement, apply_gravity, move_and_collide, align_player_sprite)
+                (player_movement, apply_gravity, move_and_collide)
                     .chain()
+                    .run_if(in_state(AppState::InGame))
+                    .run_if(in_state(GameState::Playing))
+                    .run_if(use_local_movement),
+            )
+            .add_systems(
+                Update,
+                align_player_sprite
                     .run_if(in_state(AppState::InGame))
                     .run_if(in_state(GameState::Playing)),
             )
