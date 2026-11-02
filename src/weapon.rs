@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 
-use crate::combat::{Dead, Priority};
+use crate::combat::{Dead, Priority, Hitbox};
 use crate::common::{AppState, GROUND_THICKNESS, GROUND_Y, LEVEL_LEN};
 use crate::game::GameState;
 use crate::loading::{despawn_with, LoadingAssets};
@@ -310,6 +310,7 @@ fn sword_hits(
     mut priority: ResMut<Priority>,
     mut swords: Query<(&mut ThrownSword, &mut Sprite, &Transform)>,
     players: Query<(Entity, &Player, &Transform, &PlayerSide), Without<Dead>>,
+    hitboxes: Query<&Hitbox>,
 ) {
     for (mut sword, mut sprite, sword_transform) in &mut swords {
         if sword.state != SwordState::Flying {
@@ -331,8 +332,15 @@ fn sword_hits(
             } else {
                 player.height
             };
-            let px = player_transform.translation.x;
+            let mut px = player_transform.translation.x;
             let py = player_transform.translation.y;
+            
+            for hitbox in &hitboxes {
+                if hitbox.is_attack {
+                    continue;
+                }
+                px += hitbox.width * player.facing;
+            }
 
             let overlaps_x = (sword_x - SWORD_HITBOX_W / 2.0) <= (px + player.width / 2.0)
                 && (sword_x + SWORD_HITBOX_W / 2.0) >= (px - player.width / 2.0);
@@ -340,10 +348,12 @@ fn sword_hits(
                 && (sword_y + SWORD_HITBOX_H / 2.0) >= (py - player_h / 2.0);
 
             if overlaps_x && overlaps_y {
-                commands
-                    .entity(player_entity)
-                    .insert((Dead::new(sword_x), Visibility::Hidden));
-                priority.0 = Some(sword.owner);
+                if !player.is_blocking {
+                    commands
+                        .entity(player_entity)
+                        .insert((Dead::new(sword_x), Visibility::Hidden));
+                    priority.0 = Some(sword.owner);
+                }
 
                 // stop here and play the impact frames before dropping
                 sword.state = SwordState::Impacting;

@@ -69,13 +69,13 @@ pub enum AttackType {
 #[derive(Component)]
 pub struct Hitbox {
     owner: PlayerSide,
-    width: f32,
+    pub width: f32,
     height: f32,
     life: Timer,
     attack_type: AttackType,
     damage: u8,
     has_hit: bool,
-    is_attack: bool,
+    pub is_attack: bool,
 }
 
 //const ATTACK_H: f32 = 24.0;
@@ -563,7 +563,22 @@ fn hitbox_hits(
             let overlaps_y = (hb_y - hb_half_h) <= (py + p_half_h)
                 && (hb_y + hb_half_h) >= (py - p_half_h);
 
-            if !overlaps_x || !overlaps_y {
+            let mut block = false;
+
+            // Checks if blocker is blocking the wrong direction
+            for (_, p_other, _, s_other) in &players {
+                if *s_other != hitbox.owner {
+                    continue;
+                }
+                if player.facing == p_other.facing {
+                    continue;
+                }
+                if player.is_blocking {
+                    block = true;
+                }
+            }
+
+            if !overlaps_x || !overlaps_y || block {
                 continue;
             }
 
