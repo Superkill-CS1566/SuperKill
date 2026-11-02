@@ -12,6 +12,9 @@ pub struct CameraPlugin;
 
 impl Plugin for CameraPlugin {
     fn build(&self, app: &mut App) {
+        
+        app.init_resource::<CameraFollowState>();
+
         app.add_systems(
             OnEnter(AppState::InGame),
             (spawn_background_camera, spawn_ui_camera, init_camera_zoom).chain(),
@@ -121,6 +124,7 @@ pub fn camera_follow(
     let snap = !follow.initialized || current_screen.is_changed();
     camera.translation.x = smooth_camera_x(camera.translation.x, target, time.delta_secs(), snap);
     camera.translation.y = CAMERA_Y;
+    follow.initialized = true;
 }
 
 const PARALLAX_FACTOR: f32 = 0.4;
@@ -132,7 +136,6 @@ pub fn background_camera_follow(
     background_camera.translation.x = gameplay_camera.translation.x * PARALLAX_FACTOR;
 
     background_camera.translation.y = CAMERA_Y * PARALLAX_FACTOR;
-    follow.initialized = true;
 }
 
 #[cfg(test)]

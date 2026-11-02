@@ -68,6 +68,7 @@ pub fn spawn_ui_camera(mut commands: Commands) {
             ..default()
         },
         Transform::default(),
+        Projection::Orthographic(OrthographicProjection::default_2d()),
         GlobalTransform::default(),
         UiCamera,
     ));
