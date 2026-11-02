@@ -1,7 +1,10 @@
 use bevy::prelude::*;
 
 use crate::combat::{Dead, Priority};
-use crate::common::{AppState, LEVEL_LEN, UiCamera, WIN_W, despawn_ui_camera, spawn_ui_camera};
+use crate::common::{
+    AppState, LEVEL_LEN, BackgroundCamera, UiCamera, WIN_W, despawn_background_camera, despawn_ui_camera,
+    spawn_background_camera, spawn_ui_camera,
+};
 use crate::game::{GameState, screen_transition};
 use crate::player::{Player, PlayerSide};
 
@@ -11,7 +14,7 @@ impl Plugin for CameraPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             OnEnter(AppState::InGame),
-            (spawn_ui_camera, init_camera_zoom).chain(),
+            (spawn_background_camera, spawn_ui_camera, init_camera_zoom).chain(),
         )
         .add_systems(
             Update,
@@ -20,8 +23,16 @@ impl Plugin for CameraPlugin {
                 .run_if(in_state(GameState::Playing))
                 .after(screen_transition),
         )
-        .add_systems(OnExit(AppState::InGame), despawn_ui_camera);
-        app.init_resource::<CameraFollowState>();
+        .add_systems(
+            Update,
+            background_camera_follow
+                .run_if(in_state(AppState::InGame))
+                .run_if(in_state(GameState::Playing)),
+        )
+        .add_systems(
+            OnExit(AppState::InGame),
+            (despawn_background_camera, despawn_ui_camera),
+        );
     }
 }
 
@@ -110,6 +121,17 @@ pub fn camera_follow(
     let snap = !follow.initialized || current_screen.is_changed();
     camera.translation.x = smooth_camera_x(camera.translation.x, target, time.delta_secs(), snap);
     camera.translation.y = CAMERA_Y;
+}
+
+const PARALLAX_FACTOR: f32 = 0.4;
+
+pub fn background_camera_follow(
+    gameplay_camera: Single<&Transform, (With<UiCamera>, Without<BackgroundCamera>)>,
+    mut background_camera: Single<&mut Transform, (With<BackgroundCamera>, Without<UiCamera>)>,
+) {
+    background_camera.translation.x = gameplay_camera.translation.x * PARALLAX_FACTOR;
+
+    background_camera.translation.y = CAMERA_Y * PARALLAX_FACTOR;
     follow.initialized = true;
 }
 

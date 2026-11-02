@@ -204,7 +204,7 @@ fn button_interaction(
 ) {
     for interaction in &mut play_q {
         if let Interaction::Pressed = *interaction {
-            next_state.set(AppState::Loading);
+            next_state.set(AppState::LevelSelect);
         }
     }
     for interaction in &mut test_q {

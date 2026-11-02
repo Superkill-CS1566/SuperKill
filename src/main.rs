@@ -22,6 +22,7 @@ mod game_over;
 mod weapon;
 mod animation;
 mod simplerng;
+mod level_select;
 
 use bevy::{prelude::*, window::{EnabledButtons, PresentMode}};
 
@@ -37,6 +38,7 @@ use crate::recursive_test::RecursiveTestPlugin;
 use crate::game_over::GameOverPlugin;
 use crate::weapon::WeaponPlugin;
 use crate::animation::AnimationPlugin;
+use crate::level_select::LevelSelectPlugin;
 use crate::health_visuals::HealthVisualsPlugin;
 
 fn main() {
@@ -64,5 +66,6 @@ fn main() {
         .add_plugins(PerlinNoiseTestPlugin)
         .add_plugins(ProcGenPlugin)
         .add_plugins(RecursiveTestPlugin)
+        .add_plugins(LevelSelectPlugin)
         .run();
 }
