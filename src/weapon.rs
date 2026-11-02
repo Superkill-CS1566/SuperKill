@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 
 use crate::combat::{Dead, Priority, Hitbox};
-use crate::common::{AppState, GROUND_THICKNESS, GROUND_Y, LEVEL_LEN};
+use crate::common::{AppState, GROUND_THICKNESS, GROUND_Y, LEVEL_LEN, Platform};
 use crate::game::GameState;
 use crate::loading::{despawn_with, LoadingAssets};
 use crate::player::{Controls, Player, PlayerSide};
