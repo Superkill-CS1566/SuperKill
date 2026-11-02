@@ -153,9 +153,6 @@ const GROUND_WEAPON_H: f32 = 12.0;
 /// A fighter this close to a grounded weapon can pick it up.
 const PICKUP_RADIUS: f32 = 55.0;
 
-/// Resting height for a weapon on the ground.
-const GROUND_WEAPON_Y: f32 = GROUND_Y + GROUND_THICKNESS / 2.0 + GROUND_WEAPON_H / 2.0;
-
 // ---------------------------------------------------------------- systems
 
 // One button does both: throw if armed, pick up if not.
@@ -272,16 +269,20 @@ fn advance_throw(
     }
 }
 
-// Swords fly straight, and drop where they run out of travel.
+// Swords fly straight. Running into a hill stops them with the impact frames;
+// running out of distance or reaching the level edge just drops them.
 fn move_swords(
     mut commands: Commands,
     time: Res<Time>,
     assets: Res<WeaponAssets>,
-    mut swords: Query<(Entity, &mut ThrownSword, &mut Transform)>,
+    mut swords: Query<(Entity, &mut ThrownSword, &mut Sprite, &mut Transform)>,
+    platforms: Query<(&Platform, &Transform), Without<ThrownSword>>,
 ) {
     let delta = time.delta().as_secs_f32();
+    let half_w = SWORD_HITBOX_W / 2.0;
+    let half_h = SWORD_HITBOX_H / 2.0;
 
-    for (entity, mut sword, mut transform) in &mut swords {
+    for (entity, mut sword, mut sprite, mut transform) in &mut swords {
         if sword.state != SwordState::Flying {
             continue;
         }
@@ -290,15 +291,50 @@ fn move_swords(
         transform.translation.x += sword.direction * step;
         sword.remaining -= step;
 
+        // the collider sits inside the sprite, mirrored with the flip
+        let sword_x = transform.translation.x + sword.direction * SWORD_HITBOX_OFFSET_X;
+        let sword_y = transform.translation.y + SWORD_HITBOX_OFFSET_Y;
+
+        // did it fly into the side of a hill? If it's touching more than one
+        // tile, use the face nearest the thrower so it doesn't end up inside
+        let mut wall_face: Option<f32> = None;
+        for (platform, p_transform) in &platforms {
+            let px = p_transform.translation.x;
+            let py = p_transform.translation.y;
+            let pw = platform.width / 2.0;
+            let ph = platform.height / 2.0;
+
+            let overlaps_x = (sword_x - half_w) <= (px + pw) && (sword_x + half_w) >= (px - pw);
+            let overlaps_y = (sword_y - half_h) <= (py + ph) && (sword_y + half_h) >= (py - ph);
+
+            if overlaps_x && overlaps_y {
+                // the side of this tile facing the incoming sword
+                let face = px - sword.direction * pw;
+                match wall_face {
+                    Some(nearest) if nearest * sword.direction <= face * sword.direction => {}
+                    _ => wall_face = Some(face),
+                }
+            }
+        }
+
+        if let Some(face) = wall_face {
+            // back it out to the wall so the impact frames play against it
+            transform.translation.x =
+                face - sword.direction * (half_w + SWORD_HITBOX_OFFSET_X);
+            start_impact(&mut sword, &mut sprite);
+            continue;
+        }
+
         // keep it inside the level even on a throw from near the edge
-        let limit = LEVEL_LEN / 2.0 - SWORD_HITBOX_W / 2.0;
-        let hit_wall = transform.translation.x.abs() >= limit;
-        if hit_wall {
+        let limit = LEVEL_LEN / 2.0 - half_w;
+        let hit_level_edge = transform.translation.x.abs() >= limit;
+        if hit_level_edge {
             transform.translation.x = transform.translation.x.clamp(-limit, limit);
         }
 
-        if sword.remaining <= 0.0 || hit_wall {
-            drop_weapon(&mut commands, &assets, transform.translation.x);
+        if sword.remaining <= 0.0 || hit_level_edge {
+            let surface = surface_y_at(transform.translation.x, transform.translation.y, &platforms);
+            drop_weapon(&mut commands, &assets, transform.translation.x, surface);
             commands.entity(entity).despawn();
         }
     }
@@ -356,12 +392,7 @@ fn sword_hits(
                 }
 
                 // stop here and play the impact frames before dropping
-                sword.state = SwordState::Impacting;
-                sword.frame = SWORD_IMPACT_FIRST;
-                sword.timer.reset();
-                if let Some(atlas) = &mut sprite.texture_atlas {
-                    atlas.index = SWORD_IMPACT_FIRST;
-                }
+                start_impact(&mut sword, &mut sprite);
                 break;
             }
         }
@@ -374,6 +405,7 @@ fn advance_sword_impact(
     time: Res<Time>,
     assets: Res<WeaponAssets>,
     mut swords: Query<(Entity, &mut ThrownSword, &mut Sprite, &Transform)>,
+    platforms: Query<(&Platform, &Transform), Without<ThrownSword>>,
 ) {
     for (entity, mut sword, mut sprite, transform) in &mut swords {
         if sword.state != SwordState::Impacting {
@@ -387,7 +419,8 @@ fn advance_sword_impact(
 
         sword.frame += 1;
         if sword.frame > SWORD_IMPACT_LAST {
-            drop_weapon(&mut commands, &assets, transform.translation.x);
+            let surface = surface_y_at(transform.translation.x, transform.translation.y, &platforms);
+            drop_weapon(&mut commands, &assets, transform.translation.x, surface);
             commands.entity(entity).despawn();
             continue;
         }
@@ -398,14 +431,60 @@ fn advance_sword_impact(
     }
 }
 
-fn drop_weapon(commands: &mut Commands, assets: &WeaponAssets, x: f32) {
+// Shared by a hit on a player and a hit on a hill.
+fn start_impact(sword: &mut ThrownSword, sprite: &mut Sprite) {
+    sword.state = SwordState::Impacting;
+    sword.frame = SWORD_IMPACT_FIRST;
+    sword.timer.reset();
+    if let Some(atlas) = &mut sprite.texture_atlas {
+        atlas.index = SWORD_IMPACT_FIRST;
+    }
+}
+
+/// The top of the ground directly under `x`. Prefers the highest tile that is
+/// at or below `from_y`, so a sword lands on the surface beneath it rather
+/// than jumping up onto something overhead. If nothing is below — the sword
+/// ended up inside a hill — it settles on top of the highest tile at `x`.
+fn surface_y_at(
+    x: f32,
+    from_y: f32,
+    platforms: &Query<(&Platform, &Transform), Without<ThrownSword>>,
+) -> f32 {
+    let mut below: Option<f32> = None;
+    let mut highest: Option<f32> = None;
+
+    for (platform, transform) in platforms {
+        // only tiles whose span covers this x
+        if (x - transform.translation.x).abs() > platform.width / 2.0 {
+            continue;
+        }
+        let top = transform.translation.y + platform.height / 2.0;
+
+        match highest {
+            Some(h) if h >= top => {}
+            _ => highest = Some(top),
+        }
+        if top <= from_y {
+            match below {
+                Some(b) if b >= top => {}
+                _ => below = Some(top),
+            }
+        }
+    }
+
+    // fall back to where it already is if there's somehow no ground at all
+    below.or(highest).unwrap_or(from_y)
+}
+
+fn drop_weapon(commands: &mut Commands, assets: &WeaponAssets, x: f32, surface_y: f32) {
     commands.spawn((
         Sprite {
             image: assets.ground.clone(),
             custom_size: Some(Vec2::new(GROUND_WEAPON_W, GROUND_WEAPON_H)),
             ..default()
         },
-        Transform::from_xyz(x, GROUND_WEAPON_Y, 1.0),
+        // resting on the surface, not sunk into it
+        Transform::from_xyz(x, surface_y + GROUND_WEAPON_H / 2.0, 1.0),
         GlobalTransform::default(),
         GroundWeapon,
     ));

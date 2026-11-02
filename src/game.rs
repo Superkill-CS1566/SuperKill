@@ -220,11 +220,11 @@ fn spawn_noise_terrain(
     amplitude: f32,
 ) {
 
-    let block_width = 16.0;
+    let block_width = 40.0;
 
     let chunk = sample_chunk(0, (LEVEL_LEN / block_width) as u32, seed);
 
-    let bottom_y = -300.0;
+    let bottom_y = -400.0;
 
     for (i, noise_value) in chunk.iter().enumerate() {
         let surface_y = GROUND_Y + (noise_value * amplitude) + (amplitude/2.0);

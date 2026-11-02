@@ -4,7 +4,7 @@ use crate::camera::{camera_follow, SCREEN_W};
 use crate::common::{AppState, UiCamera};
 use crate::loading::despawn_with;
 use crate::game::{CurrentScreen, GameState};
-use crate::player::{Controls, Player, PlayerSide, PLAYER_SPAWN_Y};
+use crate::player::{move_and_collide, Controls, Player, PlayerSide, PLAYER_SPAWN_Y};
 
 pub struct CombatPlugin;
 
@@ -25,6 +25,15 @@ impl Plugin for CombatPlugin {
                     .chain()
                     .run_if(in_state(AppState::InGame))
                     .run_if(in_state(GameState::Playing)),
+            )
+            // a drop ends the moment the fighter lands, so this needs the
+            // is_grounded that move_and_collide just wrote
+            .add_systems(
+                Update,
+                land_drop_attack
+                    .run_if(in_state(AppState::InGame))
+                    .run_if(in_state(GameState::Playing))
+                    .after(move_and_collide),
             )
             .add_systems(
                 Update,
@@ -62,6 +71,7 @@ const RESPAWN_MAX_WAIT: f32 = 4.0;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum AttackType {
     Standing,
+    /// The drop attack — see the JUMP_ / DROP_ constants below.
     Jumping,
     Crouching,
 }
@@ -92,31 +102,70 @@ const BLOCK_H: f32 = 52.0;
 //const ATTACK_DURATION: f32 = 0.18;
 const BLOCK_DURATION: f32 = 0.6;
 const ATTACK_COLOR: Color = Color::srgb(0.9, 0.15, 0.15);
+const ATTACK_COLOR_UNARMED: Color = Color::srgb(0.95, 0.55, 0.15);
 const BLOCK_COLOR: Color = Color::srgb(0.2, 0.2, 1.0);
 
 const STAND_DAMAGE: u8 = 1;
 const STAND_DURATION: f32 = 0.18;
 const STAND_COOLDOWN: f32 = 0.30;
-const STAND_W: f32 = 55.0;
-const STAND_H: f32 = 20.0;
 const STAND_Y_OFFSET: f32 = 15.0;
 
+// The jump attack is a drop: once a fighter has been airborne long enough,
+// it pulls them straight down and strikes whatever is underneath them.
 const JUMP_DAMAGE: u8 = 2;
-const JUMP_DURATION: f32 = 0.30;
 const JUMP_COOLDOWN: f32 = 0.50;
-const JUMP_W: f32 = 60.0;
-const JUMP_H: f32 = 50.0;
 const JUMP_Y_OFFSET: f32 = -25.0;
-const JUMP_MIN_HEIGHT: f32 = 60.0;
+/// How long a fighter must be airborne before a drop is allowed.
+const DROP_MIN_AIR_TIME: f32 = 0.22;
+/// Safety cap on the drop hitbox. It normally ends on landing, well before this.
+const DROP_MAX_DURATION: f32 = 1.5;
+/// How long the fighter is stuck in the landing afterward.
+const DROP_LANDING_LAG: f32 = 0.35;
+/// Fall speed while dropping. Read by apply_gravity in player.rs.
+/// Horizontal speed carries over unchanged from the moment the drop starts.
+pub const DROP_SPEED: f32 = -1100.0;
 
 const CROUCH_DAMAGE: u8 = 1;
 const CROUCH_DURATION: f32 = 0.10;
 const CROUCH_COOLDOWN: f32 = 0.18;
-const CROUCH_W: f32 = 70.0;
-const CROUCH_H: f32 = 16.0;
 const CROUCH_Y_OFFSET: f32 = -8.0;
 
 const HITSTUN_DURATION: f32 = 0.25;
+
+// ---------------------------------------------------------------- hitbox sizes
+// Every attack hitbox size lives here. Width is reach in front of the fighter
+// (for the drop, the width of the area underneath); height is vertical
+// coverage. Vertical *position* is the *_Y_OFFSET in each attack's block above.
+
+// standing swing
+const STAND_W: f32 = 55.0;
+const STAND_H: f32 = 20.0;
+const STAND_W_UNARMED: f32 = 28.0;
+const STAND_H_UNARMED: f32 = 20.0;
+
+// crouching swing
+const CROUCH_W: f32 = 70.0;
+const CROUCH_H: f32 = 16.0;
+const CROUCH_W_UNARMED: f32 = 35.0;
+const CROUCH_H_UNARMED: f32 = 16.0;
+
+// drop attack
+const JUMP_W: f32 = 60.0;
+const JUMP_H: f32 = 50.0;
+const JUMP_W_UNARMED: f32 = 36.0;
+const JUMP_H_UNARMED: f32 = 30.0;
+
+// Armed and unarmed attacks differ only in size.
+fn hitbox_size(attack_type: AttackType, armed: bool) -> (f32, f32) {
+    match (attack_type, armed) {
+        (AttackType::Standing, true) => (STAND_W, STAND_H),
+        (AttackType::Standing, false) => (STAND_W_UNARMED, STAND_H_UNARMED),
+        (AttackType::Crouching, true) => (CROUCH_W, CROUCH_H),
+        (AttackType::Crouching, false) => (CROUCH_W_UNARMED, CROUCH_H_UNARMED),
+        (AttackType::Jumping, true) => (JUMP_W, JUMP_H),
+        (AttackType::Jumping, false) => (JUMP_W_UNARMED, JUMP_H_UNARMED),
+    }
+}
 
 fn reset_priority(mut priority: ResMut<Priority>) {
     priority.0 = None;
@@ -244,6 +293,10 @@ fn check_respawn(
         player.is_blocking = false;
         player.hitstun = Timer::from_seconds(0.0, TimerMode::Once);
         player.current_attack = None;
+        // clear any drop that was interrupted by dying
+        player.air_time = 0.0;
+        player.is_dropping = false;
+        player.landing_lag = Timer::from_seconds(0.0, TimerMode::Once);
         
 
         commands
@@ -315,7 +368,8 @@ fn spawn_attacks(
         if !player.attack_cooldown.is_finished() {
             continue;
         }
-        if !player.hitstun.is_finished() {
+        // covers hitstun and the landing lag after a drop
+        if player.is_stunned() {
             continue;
         }
         if player.is_blocking {
@@ -330,18 +384,14 @@ fn spawn_attacks(
             ATTACK_W_UNARMED
         };*/
 
-        let ground_y = PLAYER_SPAWN_Y;
-        let height_above_ground = transform.translation.y - ground_y;
-
-        let (attack_type, damage, duration, cooldown, width, height, y_offset) =
-            if !player.is_grounded && height_above_ground > JUMP_MIN_HEIGHT {
+        // airtime rather than height above the ground, so it works on hills
+        let (attack_type, damage, duration, cooldown, y_offset) =
+            if !player.is_grounded && player.air_time >= DROP_MIN_AIR_TIME {
                 (
                     AttackType::Jumping,
                     JUMP_DAMAGE,
-                    JUMP_DURATION,
+                    DROP_MAX_DURATION,
                     JUMP_COOLDOWN,
-                    JUMP_W,
-                    JUMP_H,
                     JUMP_Y_OFFSET,
                 )
             } else if player.is_crouching {
@@ -350,8 +400,6 @@ fn spawn_attacks(
                     CROUCH_DAMAGE,
                     CROUCH_DURATION,
                     CROUCH_COOLDOWN,
-                    CROUCH_W,
-                    CROUCH_H,
                     CROUCH_Y_OFFSET,
                 )
             } else if player.is_grounded {
@@ -360,25 +408,41 @@ fn spawn_attacks(
                     STAND_DAMAGE,
                     STAND_DURATION,
                     STAND_COOLDOWN,
-                    STAND_W,
-                    STAND_H,
                     STAND_Y_OFFSET,
                 )
             } else {
+                // airborne, but not long enough for a drop yet
                 continue;
             };
+
+        // the size depends on whether they're holding the sword
+        let (width, height) = hitbox_size(attack_type, player.has_weapon);
 
         player.attack_cooldown = Timer::from_seconds(cooldown, TimerMode::Once);
         player.current_attack = Some(attack_type);
 
+        if attack_type == AttackType::Jumping {
+            // start the plunge this frame instead of waiting on apply_gravity
+            player.is_dropping = true;
+            player.velocity.y = DROP_SPEED;
+        }
+
+        // a drop strikes whatever is directly underneath; every other
+        // attack sits in front of the fighter
+        let hitbox_x = if attack_type == AttackType::Jumping {
+            transform.translation.x
+        } else {
+            transform.translation.x + player.facing * (player.width + width) / 2.0
+        };
+
         commands.spawn((
             Sprite {
-                color: ATTACK_COLOR,
+                color: if player.has_weapon { ATTACK_COLOR } else { ATTACK_COLOR_UNARMED },
                 custom_size: Some(Vec2::new(width, height)),
                 ..default()
             },
             Transform::from_xyz(
-                transform.translation.x + player.facing * (player.width + width) / 2.0,
+                hitbox_x,
                 transform.translation.y + y_offset,
                 2.0,
             ),
@@ -416,7 +480,8 @@ fn spawn_blocking(
         if !player.block_cooldown.is_finished() {
             continue;
         }
-        if player.current_attack.is_some() || !player.hitstun.is_finished() {
+        // covers hitstun and the landing lag after a drop
+        if player.current_attack.is_some() || player.is_stunned() {
             continue;
         }
 
@@ -469,7 +534,12 @@ fn update_hitboxes(
         let mut owner = None;
         for (player, p_transform, side) in &players {
             if *side == hitbox.owner {
-                owner = Some((player.facing, player.width, p_transform.translation));
+                owner = Some((
+                    player.facing,
+                    player.width,
+                    p_transform.translation,
+                    player.is_dropping,
+                ));
             }
         }
 
@@ -483,10 +553,22 @@ fn update_hitboxes(
             0.0
         };
 
+        let is_drop = hitbox.is_attack && hitbox.attack_type == AttackType::Jumping;
+
         match owner {
-            Some((facing, width, owner_pos)) => {
-                hb_transform.translation.x =
-                    owner_pos.x + facing * (width + hitbox.width) / 2.0;
+            // a drop's hitbox lasts exactly as long as the drop. Checking here
+            // rather than on landing also catches one spawned on the same frame
+            // its owner touched down, which a landing check would miss
+            Some((_, _, _, false)) if is_drop => {
+                commands.entity(entity).despawn();
+            }
+            Some((facing, width, owner_pos, _)) => {
+                // must match the placement in spawn_attacks
+                hb_transform.translation.x = if is_drop {
+                    owner_pos.x
+                } else {
+                    owner_pos.x + facing * (width + hitbox.width) / 2.0
+                };
                 hb_transform.translation.y = owner_pos.y + y_offset;
             }
             None => {
@@ -511,6 +593,19 @@ fn update_attack_state(
     }
 }
 
+// A drop ends the moment the fighter touches down, leaving them stuck in the
+// landing for a beat. Its hitbox is cleared by update_hitboxes once it sees
+// is_dropping go false.
+fn land_drop_attack(mut players: Query<&mut Player, Without<Dead>>) {
+    for mut player in &mut players {
+        if !player.is_dropping || !player.is_grounded {
+            continue;
+        }
+        player.is_dropping = false;
+        player.landing_lag = Timer::from_seconds(DROP_LANDING_LAG, TimerMode::Once);
+    }
+}
+
 fn hitbox_hits(
     mut commands: Commands,
     mut priority: ResMut<Priority>,
@@ -519,6 +614,19 @@ fn hitbox_hits(
 ) {
     let killed: Vec<PlayerSide> = Vec::new();
     let last_killer: Option<PlayerSide> = None;
+
+    // Every active block, so an attack that runs into one stops there.
+    // Collected first because the loop below borrows the hitboxes mutably.
+    let mut blocks: Vec<(PlayerSide, Vec2, Vec2)> = Vec::new();
+    for (hitbox, transform) in &hitboxes {
+        if !hitbox.is_attack {
+            blocks.push((
+                hitbox.owner,
+                transform.translation.truncate(),
+                Vec2::new(hitbox.width / 2.0, hitbox.height / 2.0),
+            ));
+        }
+    }
 
     for (mut hitbox, hb_transform) in &mut hitboxes {
         if !hitbox.is_attack || hitbox.has_hit {
@@ -542,10 +650,37 @@ fn hitbox_hits(
 
         let mut hit_entity = None;
         let mut hit_damage = 0;
+        let mut blocked = false;
 
         for (entity, player, p_transform, side) in &players {
             if *side == hitbox.owner {
                 continue;
+            }
+
+            // A block only guards the side the fighter is facing. Without this,
+            // a swing from behind could reach through the body, touch the
+            // block on the far side, and be stopped by it.
+            let from_front = (attacker_x - p_transform.translation.x) * player.facing > 0.0;
+
+            // ran into this fighter's block — the attack is spent on it
+            let mut hits_block = false;
+            if from_front {
+                for (block_owner, block_center, block_half) in &blocks {
+                    if *block_owner != *side {
+                        continue;
+                    }
+                    if (hb_x - hb_half_w) <= block_center.x + block_half.x
+                        && (hb_x + hb_half_w) >= block_center.x - block_half.x
+                        && (hb_y - hb_half_h) <= block_center.y + block_half.y
+                        && (hb_y + hb_half_h) >= block_center.y - block_half.y
+                    {
+                        hits_block = true;
+                    }
+                }
+            }
+            if hits_block {
+                blocked = true;
+                break;
             }
 
             let p_h = if player.is_crouching {
@@ -589,6 +724,12 @@ fn hitbox_hits(
             hit_entity = Some(entity);
             hit_damage = hitbox.damage;
             break;
+        }
+
+        if blocked {
+            // connected with a block, so it can't hit anything else this swing
+            hitbox.has_hit = true;
+            continue;
         }
 
         if let Some(entity) = hit_entity {
