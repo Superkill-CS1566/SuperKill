@@ -7,16 +7,23 @@ use crate::protocol::{
 use tokio::sync::mpsc;
 use std::sync::Mutex;
 use crate::player::{Player, PlayerSide};
+use crate::common::AppState;
 
 pub struct NetworkPlugin;
 
-// adds client networking systems to the Bevy Application
 impl Plugin for NetworkPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, start_network_client)
+
+        // remember which player this client controls
+        app.init_resource::<LocalPlayerId>()
+            .add_systems(Startup, start_network_client)
             .add_systems(
-                Update, 
-                (send_player_input, apply_server_messages),
+                Update,
+                (
+                    // send controls only while playing
+                    send_player_input.run_if(in_state(AppState::InGame)),
+                    apply_server_messages,
+                ),
             );
     }
 }
@@ -27,6 +34,10 @@ pub struct NetworkClient {
     pub outgoing: mpsc::Sender<ClientMessage>,
     pub incoming: Mutex<mpsc::Receiver<ServerMessage>>,
 }
+
+// identifies which fighter this game client controls
+#[derive(Resource, Default)]
+pub struct LocalPlayerId(pub Option<u8>);
 
 // starts the UDP client on a separate Tokio thread
 fn start_network_client(mut commands: Commands) {
@@ -139,7 +150,13 @@ fn start_network_client(mut commands: Commands) {
 fn send_player_input(
     keyboard: Res<ButtonInput<KeyCode>>,
     network: Res<NetworkClient>,
+    local_player: Res<LocalPlayerId>,
 ) {
+
+    if local_player.0.is_none() {
+        return;
+    }
+
     let mut movement_x = 0.0;
 
     if keyboard.pressed(KeyCode::KeyA) {
@@ -168,6 +185,7 @@ fn send_player_input(
 fn apply_server_messages(
     network: Res<NetworkClient>,
     mut player_query: Query<(&PlayerSide, &mut Player, &mut Transform)>,
+    mut local_player: ResMut<LocalPlayerId>,
 ) {
     let Ok(mut incoming) = network.incoming.lock() else {
         return;
@@ -176,6 +194,7 @@ fn apply_server_messages(
     while let Ok(message) = incoming.try_recv() {
         match message {
             ServerMessage::Connected { player_id } => {
+                local_player.0 = Some(player_id);
                 println!("This client is Player {player_id}");
             }
 
