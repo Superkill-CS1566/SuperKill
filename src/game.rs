@@ -1,11 +1,14 @@
 use bevy::prelude::*;
+use bevy::camera::visibility::RenderLayers;
 
-use crate::common::{AppState, Platform, GROUND_Y, LEVEL_LEN};
 use crate::combat::{Dead, Priority};
+use crate::common::{AppState, BACKGROUND_LAYER, GROUND_THICKNESS, GROUND_Y, LEVEL_LEN, Platform};
+use crate::level_select::{LevelType, SelectedLevel};
 use crate::loading::{LoadingAssets, despawn_with};
-use crate::player::{move_and_collide, Player, PlayerSide};
-use crate::weapon::{GroundWeapon, ThrownSword};
 use crate::perlin_noise::sample_chunk;
+use crate::player::{Player, PlayerSide, move_and_collide};
+use crate::recursive_generation::{MazeGrid, Tile, rd_generate_maze};
+use crate::weapon::{GroundWeapon, ThrownSword};
 
 pub struct GamePlugin;
 
@@ -28,7 +31,10 @@ impl Plugin for GamePlugin {
                         .run_if(in_state(GameState::Paused)),
                 ),
             )
-            .add_systems(OnExit(AppState::InGame), (despawn_game, despawn_with::<Background>));
+            .add_systems(
+                OnExit(AppState::InGame),
+                (despawn_game, despawn_with::<Background>),
+            );
     }
 }
 
@@ -72,18 +78,22 @@ struct Seed(u64);
 const BG_OFFSET_Y: f32 = 65.0;
 const SCREEN_INSET: f32 = 20.0;
 const START_SCREEN: usize = 1;
-const BG_WIDTH: f32 = 1280.0;
+const MAZE_WIDTH: usize = 39;
+const MAZE_HEIGHT: usize = 21;
+
+const MAZE_TILE_SIZE: f32 = 50.0;
+
 const BG_PATHS: &[&str] = &[
-    "white_grid_inverted.png",
-    "backgrounds/hills.png",   // start screen
+    "backgrounds/street.png",
+    "backgrounds/hills.png", // start screen
     "white_grid_inverted.png",
 ];
 
-// add stuff for loading in foreground later for now just background 
+// add stuff for loading in foreground later for now just background
 // might put it in separate file since its more a part of procedural gen
 fn load_level(
-    mut commands: Commands, 
-    asset_server: Res<AssetServer>, 
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
     mut loading_assets: ResMut<LoadingAssets>,
 ) {
     let mut handles = Vec::new();
@@ -99,14 +109,23 @@ fn load_level(
 fn setup_level(
     mut commands: Commands,
     backgrounds: Res<Backgrounds>,
+    selected_level: Res<SelectedLevel>,
 ) {
-    commands.insert_resource(CurrentScreen(START_SCREEN));
+    let screen = match selected_level.0 {
+        LevelType::Flat => 0,
+        LevelType::Noise => 1,
+        LevelType::Maze => 2,
+    };
+
+    commands.insert_resource(CurrentScreen(screen));
+
     commands.spawn((
         Sprite {
-            image: backgrounds.0[START_SCREEN].clone(),
+            image: backgrounds.0[screen].clone(),
             ..default()
         },
-        Transform::from_xyz(0., BG_OFFSET_Y - 360., -1.),
+        Transform::from_xyz(0., BG_OFFSET_Y, -1.),
+        RenderLayers::layer(BACKGROUND_LAYER),
         Background,
     ));
 }
@@ -124,15 +143,17 @@ pub fn screen_transition(
     leftovers: Query<Entity, Or<(With<GroundWeapon>, With<ThrownSword>)>>,
 ) {
     // neutral — nobody advances
-    let Some(holder) = priority.0 else { return; };
+    let Some(holder) = priority.0 else {
+        return;
+    };
 
     let dir = holder.advance_dir();
     // edge of the background image, not the edge of the view
     let edge = LEVEL_LEN / 2.0;
 
-    let at_edge = players.iter().any(|(p, t, s)| {
-        *s == holder && t.translation.x * dir >= edge - p.width / 2.0 - 1.0
-    });
+    let at_edge = players
+        .iter()
+        .any(|(p, t, s)| *s == holder && t.translation.x * dir >= edge - p.width / 2.0 - 1.0);
     if !at_edge {
         return;
     }
@@ -161,7 +182,6 @@ pub fn screen_transition(
         commands.entity(entity).despawn();
     }
 
-
     // leader enters from behind; the other fighter appears ahead of them
     for (mut player, mut transform, side) in &mut players {
         let sign = if *side == holder { -1.0 } else { 1.0 };
@@ -174,7 +194,6 @@ pub fn screen_transition(
     }
 }
 
-
 fn despawn_tree(commands: &mut Commands, entity: Entity, children: &Query<&Children>) {
     if let Ok(kids) = children.get(entity) {
         for kid in kids.iter() {
@@ -184,27 +203,37 @@ fn despawn_tree(commands: &mut Commands, entity: Entity, children: &Query<&Child
     commands.entity(entity).despawn();
 }
 
-fn setup_game(mut commands: Commands, seed: Res<Seed>, mut next_game_state: ResMut<NextState<GameState>>) {
-
+fn setup_game(
+    mut commands: Commands,
+    seed: Res<Seed>,
+    selected_level: Res<SelectedLevel>,
+    mut next_game_state: ResMut<NextState<GameState>>,
+) {
     next_game_state.set(GameState::Playing);
 
-    //spawn_platform(&mut commands, 0.0, GROUND_Y, LEVEL_LEN, GROUND_THICKNESS, Color::srgb(0.25, 0.25, 0.3));
-    spawn_noise_terrain(
-        &mut commands,
-        seed.0,
-        -LEVEL_LEN/2.0,
-        250.0
-    );
+    match selected_level.0 {
+        LevelType::Flat => {
+            spawn_platform(
+                &mut commands,
+                0.0,
+                GROUND_Y,
+                LEVEL_LEN,
+                GROUND_THICKNESS,
+                Color::srgb(0.25, 0.25, 0.3),
+            );
+        }
+
+        LevelType::Noise => {
+            spawn_noise_terrain(&mut commands, seed.0, -LEVEL_LEN / 2.0, GROUND_THICKNESS);
+        }
+
+        LevelType::Maze => {
+            spawn_maze(&mut commands, 1, 1);
+        }
+    }
 }
 
-fn spawn_platform(
-    commands: &mut Commands,
-    x: f32,
-    y: f32,
-    width: f32,
-    height: f32,
-    color: Color,
-) {
+fn spawn_platform(commands: &mut Commands, x: f32, y: f32, width: f32, height: f32, color: Color) {
     commands.spawn((
         Sprite {
             color,
@@ -220,13 +249,7 @@ fn spawn_platform(
     ));
 }
 
-fn spawn_noise_terrain(
-    commands: &mut Commands,
-    seed: u64,
-    start_x: f32,
-    amplitude: f32,
-) {
-
+fn spawn_noise_terrain(commands: &mut Commands, seed: u64, start_x: f32, amplitude: f32) {
     let block_width = 16.0;
 
     let chunk = sample_chunk(0, (LEVEL_LEN / block_width) as u32, seed);
@@ -234,7 +257,7 @@ fn spawn_noise_terrain(
     let bottom_y = -360.0;
 
     for (i, noise_value) in chunk.iter().enumerate() {
-        let surface_y = GROUND_Y + (noise_value * amplitude) + (amplitude/2.0);
+        let surface_y = GROUND_Y + (noise_value * amplitude) + amplitude;
 
         let height = surface_y - bottom_y;
         let center_y = bottom_y + height / 2.0;
@@ -248,6 +271,87 @@ fn spawn_noise_terrain(
             Color::srgb(0.25, 0.25, 0.3),
         );
     }
+}
+
+fn spawn_maze(commands: &mut Commands, seed: u64, level: u32) {
+    let grid = rd_generate_maze(MAZE_WIDTH, MAZE_HEIGHT, seed, level);
+
+    let tile_size = MAZE_TILE_SIZE;
+
+    let start_x = -(grid.width() as f32 * tile_size) / 2.0;
+    let start_y = (grid.height() as f32 * tile_size) / 2.0;
+
+    let rectangles = merge_wall_tiles(&grid);
+
+    for (x, y, width, height) in rectangles {
+        let world_x = start_x + (x as f32 * tile_size) + (width as f32 * tile_size) / 2.0;
+
+        let world_y = start_y - (y as f32 * tile_size) - (height as f32 * tile_size) / 2.0;
+
+        spawn_platform(
+            commands,
+            world_x,
+            world_y,
+            width as f32 * tile_size,
+            height as f32 * tile_size,
+            Color::srgb(0.25, 0.25, 0.3),
+        );
+    }
+}
+
+fn merge_wall_tiles(grid: &MazeGrid) -> Vec<(usize, usize, usize, usize)> {
+    let width = grid.width();
+    let height = grid.height();
+
+    let mut visited = vec![vec![false; width]; height];
+
+    // Each tuple represents (x, y, width, height) in tiles
+    let mut rectangles = Vec::new();
+
+    for y in 0..height {
+        for x in 0..width {
+            if visited[y][x] || grid.tile(x, y) != Tile::Wall {
+                continue;
+            }
+
+            // Find the maximum horizontal stretch
+            let mut rect_width = 0;
+
+            while x + rect_width < width
+                && !visited[y][x + rect_width]
+                && grid.tile(x + rect_width, y) == Tile::Wall
+            {
+                rect_width += 1;
+            }
+
+            // Find the maximum vertical stretch
+            let mut rect_height = 1;
+
+            'outer: while y + rect_height < height {
+                for dx in 0..rect_width {
+                    let next_y = y + rect_height;
+                    let next_x = x + dx;
+
+                    if visited[next_y][next_x] || grid.tile(next_x, next_y) != Tile::Wall {
+                        break 'outer;
+                    }
+                }
+
+                rect_height += 1;
+            }
+
+            // Mark all tiles in this rectangle as visited
+            for dy in 0..rect_height {
+                for dx in 0..rect_width {
+                    visited[y + dy][x + dx] = true;
+                }
+            }
+
+            rectangles.push((x, y, rect_width, rect_height));
+        }
+    }
+
+    rectangles
 }
 
 fn toggle_pause(

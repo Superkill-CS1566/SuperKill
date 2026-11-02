@@ -1,4 +1,6 @@
 use bevy::prelude::*;
+use bevy::camera::visibility::RenderLayers;
+
 pub const LEVEL_LEN: f32 = 1920.;
 pub const WIN_W: f32 = 1280.;
 pub const WIN_H: f32 = 720.;
@@ -21,12 +23,18 @@ pub enum AppState {
     ProcGenMenu,
     DFSMazeTesting,
     PNoiseTesting,
-    RDMazeTesting
+    RDMazeTesting,
+    LevelSelect
 }
 
 // camera
 #[derive(Component)]
 pub struct UiCamera;
+
+pub const BACKGROUND_LAYER: usize = 1;
+
+#[derive(Component)]
+pub struct BackgroundCamera;
 
 // any solid surface the fighters stand on or bump into
 #[derive(Component)]
@@ -35,14 +43,43 @@ pub struct Platform {
     pub height: f32,
 }
 
-// Made spawning in camera a function since both screens spawned their own identical camera.
+pub fn spawn_background_camera(mut commands: Commands) {
+    commands.spawn((
+        Camera2d,
+        Camera {
+            order: 0,
+            ..default()
+        },
+        Projection::Orthographic(OrthographicProjection {
+            scale: 1.0,
+            ..OrthographicProjection::default_2d()
+        }),
+        RenderLayers::layer(BACKGROUND_LAYER),
+        BackgroundCamera,
+    ));
+}
+
 pub fn spawn_ui_camera(mut commands: Commands) {
     commands.spawn((
         Camera2d,
+        Camera {
+            order: 1,
+            clear_color: ClearColorConfig::Default,
+            ..default()
+        },
         Transform::default(),
         GlobalTransform::default(),
         UiCamera,
     ));
+}
+
+pub fn despawn_background_camera(
+    mut commands: Commands,
+    camera: Query<Entity, With<BackgroundCamera>>,
+) {
+    for entity in &camera {
+        commands.entity(entity).despawn();
+    }
 }
 
 // Same with despawning cameras
