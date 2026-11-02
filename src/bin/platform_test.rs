@@ -11,12 +11,16 @@ mod combat;
 mod common;
 #[path = "../game.rs"]
 mod game;
+#[path = "../level_select.rs"]
+mod level_select;
 #[path = "../loading.rs"]
 mod loading;
 #[path = "../perlin_noise.rs"]
 mod perlin_noise;
 #[path = "../player.rs"]
 mod player;
+#[path = "../recursive_generation.rs"]
+mod recursive_generation;
 #[path = "../simplerng.rs"]
 mod simplerng;
 #[path = "../weapon.rs"]

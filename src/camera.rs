@@ -121,6 +121,7 @@ pub fn camera_follow(
     let snap = !follow.initialized || current_screen.is_changed();
     camera.translation.x = smooth_camera_x(camera.translation.x, target, time.delta_secs(), snap);
     camera.translation.y = CAMERA_Y;
+    follow.initialized = true;
 }
 
 const PARALLAX_FACTOR: f32 = 0.4;
@@ -132,7 +133,6 @@ pub fn background_camera_follow(
     background_camera.translation.x = gameplay_camera.translation.x * PARALLAX_FACTOR;
 
     background_camera.translation.y = CAMERA_Y * PARALLAX_FACTOR;
-    follow.initialized = true;
 }
 
 #[cfg(test)]

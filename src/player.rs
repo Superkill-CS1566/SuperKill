@@ -45,6 +45,20 @@ pub enum PlayerSide {
     Right,
 }
 
+// marks the remote fighter driven by network snapshots instead of local input
+#[derive(Component)]
+pub struct NetworkControlled;
+
+impl PlayerSide {
+    pub fn from_player_id(id: u8) -> Option<Self> {
+        match id {
+            1 => Some(PlayerSide::Left),
+            2 => Some(PlayerSide::Right),
+            _ => None,
+        }
+    }
+}
+
 // 每个玩家自己的按键绑定
 #[derive(Component)]
 pub struct Controls {
@@ -84,6 +98,9 @@ pub struct Player {
     pub is_dropping: bool,
     /// The beat after a drop lands, when the fighter can't act.
     pub landing_lag: Timer,
+    /// Damage dealt to the remote fighter since the last snapshot; sent to
+    /// the server so the other client applies it. Zero in offline play.
+    pub damage_out: u8,
 }
 
 impl Player {
@@ -209,6 +226,7 @@ fn spawn_player(commands: &mut Commands, sheets: &PlayerSheets, side: PlayerSide
             air_time: 0.0,
             is_dropping: false,
             landing_lag: Timer::from_seconds(0.0, TimerMode::Once),
+            damage_out: 0,
         },
         side,
         side.controls(),
@@ -219,7 +237,7 @@ fn spawn_player(commands: &mut Commands, sheets: &PlayerSheets, side: PlayerSide
 fn player_movement(
     keyboard: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
-    mut query: Query<(&mut Player, &mut Transform, &Controls), Without<Dead>>,
+    mut query: Query<(&mut Player, &mut Transform, &Controls), (Without<Dead>, Without<NetworkControlled>)>,
 ) {
     for (mut player, mut transform, controls) in &mut query {
         player.attack_cooldown.tick(time.delta());
@@ -287,7 +305,7 @@ fn player_movement(
     }
 }
 
-fn apply_gravity(time: Res<Time>, mut query: Query<&mut Player, Without<Dead>>) {
+fn apply_gravity(time: Res<Time>, mut query: Query<&mut Player, (Without<Dead>, Without<NetworkControlled>)>) {
     for mut player in &mut query {
         if !player.is_grounded {
             player.air_time += time.delta().as_secs_f32();
@@ -308,7 +326,7 @@ fn apply_gravity(time: Res<Time>, mut query: Query<&mut Player, Without<Dead>>) 
 
 pub fn move_and_collide(
     time: Res<Time>,
-    mut player_query: Query<(&mut Player, &mut Transform, &PlayerSide), Without<Dead>>,
+    mut player_query: Query<(&mut Player, &mut Transform, &PlayerSide), (Without<Dead>, Without<NetworkControlled>)>,
     platform_query: Query<(&Platform, &Transform), Without<Player>>,
 ) {
     let delta = time.delta().as_secs_f32();
