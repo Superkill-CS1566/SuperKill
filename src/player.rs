@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
 
-use crate::combat::{AttackType, Dead};
+use crate::combat::{AttackType, Dead, DROP_SPEED};
 use crate::common::{AppState, Platform, GROUND_THICKNESS, GROUND_Y, LEVEL_LEN, WIN_H};
 use crate::game::GameState;
 use crate::loading::despawn_with;
@@ -77,7 +77,20 @@ pub struct Player {
     pub current_attack: Option<AttackType>,
     pub has_weapon: bool,
     pub is_blocking: bool,
-    pub block_cooldown: Timer
+    pub block_cooldown: Timer,
+    /// Seconds since leaving the ground. A drop attack needs enough of it.
+    pub air_time: f32,
+    /// Mid drop attack — being pulled straight down.
+    pub is_dropping: bool,
+    /// The beat after a drop lands, when the fighter can't act.
+    pub landing_lag: Timer,
+}
+
+impl Player {
+    /// Can't act right now — recoiling from a hit, or stuck landing a drop.
+    pub fn is_stunned(&self) -> bool {
+        !self.hitstun.is_finished() || !self.landing_lag.is_finished()
+    }
 }
 
 const GRAVITY: f32 = 1800.0;
@@ -91,7 +104,7 @@ const PLAYER_SPEED: f32 = 320.0;
 const JUMP_FORCE: f32 = 620.0;
 // Because the blocking entity despawns along with its components,
 // this is a player constant
-const BLOCK_COOLDOWN: f32 = 2.00;
+const BLOCK_COOLDOWN: f32 = 1.5;
 
 // how far from center each fighter starts
 const SPAWN_OFFSET_X: f32 = 200.0;
@@ -193,6 +206,9 @@ fn spawn_player(commands: &mut Commands, sheets: &PlayerSheets, side: PlayerSide
             current_attack: None,
             is_blocking: false,
             block_cooldown: Timer::from_seconds(BLOCK_COOLDOWN, TimerMode::Once),
+            air_time: 0.0,
+            is_dropping: false,
+            landing_lag: Timer::from_seconds(0.0, TimerMode::Once),
         },
         side,
         side.controls(),
@@ -208,9 +224,12 @@ fn player_movement(
     for (mut player, mut transform, controls) in &mut query {
         player.attack_cooldown.tick(time.delta());
         player.hitstun.tick(time.delta());
+        player.landing_lag.tick(time.delta());
 
-        let in_hitstun = !player.hitstun.is_finished();
+        // landing lag from a drop locks the fighter the same way hitstun does
+        let in_hitstun = player.is_stunned();
         let in_attack = player.current_attack.is_some();
+        let in_block = player.is_blocking;
 
         let now_crouching = keyboard.pressed(controls.crouch) && !in_hitstun && !in_attack;
         //let now_crouching = keyboard.pressed(controls.crouch);
@@ -231,7 +250,7 @@ fn player_movement(
         // player.is_crouching = now_crouching;
 
         let mut move_dir = 0.0;
-        if !in_hitstun {
+        if !in_hitstun && !in_block{
             if keyboard.pressed(controls.left) {
                 move_dir -= 1.0;
             }
@@ -245,13 +264,16 @@ fn player_movement(
         }
 
         let speed_mult = match player.current_attack {
-            Some(AttackType::Jumping) => 0.7,
             Some(AttackType::Crouching) => 0.4,
             _ => 1.0,
         };
         let crouch_mult = if player.is_crouching { 0.5 } else { 1.0 };
         let hitstun_mult = if in_hitstun { 0.0 } else { 1.0 };
-        player.velocity.x = move_dir * player.speed * speed_mult * crouch_mult * hitstun_mult;
+        // a drop keeps the horizontal speed it started with until it lands,
+        // so input doesn't steer it
+        if !player.is_dropping {
+            player.velocity.x = move_dir * player.speed * speed_mult * crouch_mult * hitstun_mult;
+        }
 
         if keyboard.just_pressed(controls.jump)
             && player.is_grounded
@@ -268,9 +290,18 @@ fn player_movement(
 fn apply_gravity(time: Res<Time>, mut query: Query<&mut Player, Without<Dead>>) {
     for mut player in &mut query {
         if !player.is_grounded {
-            player.velocity.y -= GRAVITY * time.delta().as_secs_f32();
-            // 终端速度限制
-            player.velocity.y = player.velocity.y.max(TERMINAL_VELOCITY);
+            player.air_time += time.delta().as_secs_f32();
+
+            if player.is_dropping {
+                // a drop attack pulls straight down instead of arcing
+                player.velocity.y = DROP_SPEED;
+            } else {
+                player.velocity.y -= GRAVITY * time.delta().as_secs_f32();
+                // 终端速度限制
+                player.velocity.y = player.velocity.y.max(TERMINAL_VELOCITY);
+            }
+        } else {
+            player.air_time = 0.0;
         }
     }
 }

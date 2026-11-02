@@ -3,6 +3,7 @@ mod combat;
 mod common;
 mod credits;
 mod game;
+mod health_visuals;
 mod loading;
 mod main_menu;
 mod network;
@@ -38,10 +39,12 @@ use crate::game_over::GameOverPlugin;
 use crate::weapon::WeaponPlugin;
 use crate::animation::AnimationPlugin;
 use crate::level_select::LevelSelectPlugin;
+use crate::health_visuals::HealthVisualsPlugin;
 
 fn main() {
     App::new()
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
+        .add_plugins(DefaultPlugins.set(ImagePlugin::default_nearest())
+            .set(WindowPlugin {
             primary_window: Some(Window {
                 title: "SuperKill".into(),
                 resolution: (1280, 720).into(),
@@ -58,7 +61,7 @@ fn main() {
         // changed this to just add the plugins
         .add_plugins((MainMenuPlugin, CreditsPlugin, SettingsPlugin, TestPlugin, LoadingPlugin, NetworkPlugin))
         // in-game: level + fighters + camera + combat
-        .add_plugins((GamePlugin, PlayerPlugin, CameraPlugin, CombatPlugin, GameOverPlugin, WeaponPlugin, AnimationPlugin))
+        .add_plugins((GamePlugin, PlayerPlugin, CameraPlugin, CombatPlugin, GameOverPlugin, WeaponPlugin, AnimationPlugin, HealthVisualsPlugin))
         .add_plugins(ProceduralTestPlugin)
         .add_plugins(PerlinNoiseTestPlugin)
         .add_plugins(ProcGenPlugin)
