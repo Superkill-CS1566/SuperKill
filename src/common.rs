@@ -28,6 +28,10 @@ pub enum AppState {
 #[derive(Component)]
 pub struct UiCamera;
 
+// player id assigned to this game client by server
+#[derive(Resource, Default)]
+pub struct LocalPlayerId(pub Option<u8>);
+
 // any solid surface the fighters stand on or bump into
 #[derive(Component)]
 pub struct Platform {

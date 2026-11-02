@@ -31,10 +31,12 @@ async fn main() -> io::Result<()> {
         movement_y: 0.0,
         jump: false,
         crouch: false,
+        attack: false,
     };
 
     let mut latest_inputs = [idle_input.clone(), idle_input];
     let mut pending_jumps = [false; 2];
+    let mut pending_attacks = [false; 2];
     let mut last_input_at: [Option<Instant>; 2] = [None; 2];
 
     let mut ticker = interval(Duration::from_secs_f32(TICK_SECONDS));
@@ -116,8 +118,10 @@ async fn main() -> io::Result<()> {
 
                             // save the latest controls and hold jump until the next tick
                             pending_jumps[index] |= input.jump;
+                            pending_attacks[index] |= input.attack;
                             latest_inputs[index] = input;
                             latest_inputs[index].jump = false;
+                            latest_inputs[index].attack = false;
 
                             // record when this player last sent input
                             last_input_at[index] = Some(Instant::now());
@@ -137,17 +141,20 @@ async fn main() -> io::Result<()> {
 
                     if recent {
                         frame_inputs[index].jump = pending_jumps[index];
+                        frame_inputs[index].attack = pending_attacks[index];
                     } else {
-                        // stop movement when a player stops sending input
+                        // stop movement and actions when input stops arriving
                         frame_inputs[index].movement_x = 0.0;
                         frame_inputs[index].movement_y = 0.0;
                         frame_inputs[index].jump = false;
                         frame_inputs[index].crouch = false;
+                        frame_inputs[index].attack = false;
                     }
                 }
 
                 // advance both players once at the fixed server rate
                 game.step([&frame_inputs[0], &frame_inputs[1]]);
+                pending_attacks = [false; 2];
                 pending_jumps = [false; 2];
 
                 // send the updated player states to every connected client

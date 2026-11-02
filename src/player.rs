@@ -7,7 +7,7 @@ use crate::game::GameState;
 use crate::loading::despawn_with;
 use crate::animation::{PlayerAnim, PlayerSheets, PLAYER_SPRITE_H, PLAYER_SPRITE_W};
 use crate::weapon::ShowHitboxes;
-use crate::network::LocalPlayerId;
+use crate::common::LocalPlayerId;
 
 pub struct PlayerPlugin;
 
@@ -28,7 +28,8 @@ fn use_local_movement(local_player: Res<LocalPlayerId>) -> bool {
 
 impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(OnEnter(AppState::InGame), spawn_players)
+        app.init_resource::<LocalPlayerId>()
+            .add_systems(OnEnter(AppState::InGame), spawn_players)
             .add_systems(
                 Update,
                 (player_movement, apply_gravity, move_and_collide)

@@ -20,6 +20,7 @@ pub struct PlayerInput {
     pub movement_y: f32, 
     pub jump: bool,
     pub crouch: bool,
+    pub attack: bool,
 }
 
 // messages that a client sends to the server

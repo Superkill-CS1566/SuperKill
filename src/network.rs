@@ -7,7 +7,7 @@ use crate::protocol::{
 use tokio::sync::mpsc;
 use std::sync::Mutex;
 use crate::player::{Player, PlayerSide};
-use crate::common::AppState;
+use crate::common::{AppState, LocalPlayerId};
 
 pub struct NetworkPlugin;
 
@@ -34,10 +34,6 @@ pub struct NetworkClient {
     pub outgoing: mpsc::Sender<ClientMessage>,
     pub incoming: Mutex<mpsc::Receiver<ServerMessage>>,
 }
-
-// identifies which fighter this game client controls
-#[derive(Resource, Default)]
-pub struct LocalPlayerId(pub Option<u8>);
 
 // starts the UDP client on a separate Tokio thread
 fn start_network_client(mut commands: Commands) {
@@ -172,6 +168,7 @@ fn send_player_input(
         movement_y: 0.0, 
         jump: keyboard.just_pressed(KeyCode::KeyW),
         crouch: keyboard.pressed(KeyCode::KeyS),
+        attack: keyboard.just_pressed(KeyCode::KeyG),
     };
 
     let message = ClientMessage::PlayerInput(input);
