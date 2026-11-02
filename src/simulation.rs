@@ -1,5 +1,6 @@
 use crate::protocol::{PlayerInput, PlayerSnapshot};
 
+// shared timing and flat-level boundaries for simulation
 pub const TICK_SECONDS: f32 = 1.0 / 60.0;
 pub const LEVEL_HALF_WIDTH: f32 = 960.0;
 pub const GROUND_TOP: f32 = -270.0;
@@ -23,7 +24,10 @@ pub struct PlayerState {
     pub is_crouching: bool,
 }
 
+// gameplay state of one player
 impl PlayerState {
+
+    // place player at their starting position on the flat ground
     pub fn new(player_id: u8) -> Self {
         assert!(player_id == 1 || player_id == 2);
 
@@ -38,8 +42,8 @@ impl PlayerState {
         }
     }
 
+    // advance this player by one fixed tick using their latest input
     pub fn step(&mut self, input: &PlayerInput) {
-        // Network input must never be allowed to multiply movement speed.
         let direction = if input.movement_x.is_finite() {
             input.movement_x.clamp(-1.0, 1.0)
         } else {
@@ -87,6 +91,7 @@ impl PlayerState {
         }
     }
 
+    // convert the player's state into a message that server can send
     pub fn snapshot(&self) -> PlayerSnapshot {
         PlayerSnapshot {
             player_id: self.player_id,
@@ -98,6 +103,7 @@ impl PlayerState {
 }
 
 #[derive(Debug, Clone)]
+// hold the authoriative gameplay state for both players
 pub struct MatchState {
     pub players: [PlayerState; 2],
 }
@@ -109,12 +115,14 @@ impl MatchState {
         }
     }
 
+    // advance both players by one fixed tick
     pub fn step(&mut self, inputs: [&PlayerInput; 2]) {
         for (player, input) in self.players.iter_mut().zip(inputs) {
             player.step(input);
         }
     }
 
+    // collect both player states for a server update
     pub fn snapshots(&self) -> Vec<PlayerSnapshot> {
         self.players.iter().map(PlayerState::snapshot).collect()
     }

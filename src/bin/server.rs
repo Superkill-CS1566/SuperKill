@@ -4,18 +4,11 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use postcard::{from_bytes, to_allocvec};
 
-#[path = "../protocol.rs"]
-mod protocol;
-use protocol::{
-    ClientMessage, PlayerSnapshot, ServerMessage,
+// import the shared network messages and gameplay simulation
+use superkill::{
+    protocol::{ClientMessage, ServerMessage},
+    simulation::MatchState,
 };
-
-// values used to calculate player movement on server
-const GROUND_LEVEL: f32 = -240.0;
-const PLAYER_SPEED: f32 = 320.0;
-const JUMP_FORCE: f32 = 620.0;
-const GRAVITY: f32 = 1800.0;
-const TIME_STEP: f32 = 1.0/60.0;
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
@@ -26,12 +19,9 @@ async fn main() -> io::Result<()> {
     
     // maps each network address to its assigned player ID
     let mut players: HashMap<SocketAddr, u8> = HashMap::new();
-    // stores latest state of each player
-    let mut player_states: HashMap<u8, PlayerSnapshot> = 
-        HashMap::new();
-    // stores each players vertical speed
-    let mut vertical_velocities: HashMap<u8, f32> = 
-        HashMap::new();
+    
+    // store both players in the shared match state
+    let mut game = MatchState::new();
 
     println!("Server listening on 0.0.0.0:5000");
 
@@ -75,25 +65,6 @@ async fn main() -> io::Result<()> {
                 let player_id = players.len() as u8 + 1;
                 players.insert(addr, player_id);
 
-                let starting_x = if player_id == 1 {
-                    -200.0
-                } else {
-                    200.0
-                };
-
-                // create the player's initial state
-                player_states.insert(
-                    player_id,
-                    PlayerSnapshot {
-                        player_id,
-                        position_x: starting_x,
-                        position_y: GROUND_LEVEL,
-                        is_crouching: false,
-                    },
-                );
-                
-                vertical_velocities.insert(player_id, 0.0);
-
                 println!("Registered {addr} as Player {player_id}");
                 println!("Connected players: {}/2", players.len());
 
@@ -120,67 +91,21 @@ async fn main() -> io::Result<()> {
             }
 
             ClientMessage::PlayerInput(input) => {
-
-                // only accept movement from registered clients
+                
+                // accept input only from a registered player's connection
                 if let Some(&player_id) = players.get(&addr) {
 
-                    if let Some(state) = player_states.get_mut(&player_id) {
+                    // update this player using the shared simulation
+                    game.players[(player_id - 1) as usize].step(&input);
 
-                        // update crouching and horizontal movement
-                        let is_grounded = state.position_y <= GROUND_LEVEL;
-                        state.is_crouching = input.crouch && is_grounded; 
-
-                        let movement_speed = if state.is_crouching {
-                            PLAYER_SPEED * 0.5
-                        } else {
-                            PLAYER_SPEED
-                        };
-
-                        state.position_x += 
-                            input.movement_x * movement_speed * TIME_STEP;
-
-                        // update jumping, gravity, and ground collision
-                        let vertical_velocity = vertical_velocities
-                            .entry(player_id)
-                            .or_insert(0.0);
-
-                        if input.jump && state.position_y <= GROUND_LEVEL && !state.is_crouching{
-                            *vertical_velocity = JUMP_FORCE;
-                        }
-
-                        if state.position_y > GROUND_LEVEL
-                            || *vertical_velocity > 0.0
-                        {
-                            *vertical_velocity -= GRAVITY * TIME_STEP;
-                            state.position_y += *vertical_velocity * TIME_STEP;
-
-                            if state.position_y <= GROUND_LEVEL {
-                                state.position_y = GROUND_LEVEL;
-                                *vertical_velocity = 0.0;
-                            }
-                        }
-
-                        println!(
-                            "Player {player_id} position: ({}, {})",
-                            state.position_x,
-                            state.position_y
-                        );
-                    }
-
-                    // colelct latest player states into one game update
-                    let snapshots: Vec<PlayerSnapshot> =
-                        player_states.values().cloned().collect();
-
+                    // broadcast the updated state of both players to every client
                     let update = ServerMessage::GameState {
-                        players: snapshots,
+                        players: game.snapshots(),
                     };
 
-                    // send update game state to every connected client
                     if let Ok(bytes) = to_allocvec(&update) {
                         for &client_addr in players.keys() {
-                            let _ = socket
-                                .send_to(&bytes, client_addr)
-                                .await;
+                            let _ = socket.send_to(&bytes, client_addr).await;
                         }
                     }
                 } else {
