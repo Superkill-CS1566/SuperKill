@@ -85,7 +85,7 @@ Levels are built from preset assets (NPCs, weapons, obstacles). There are a few 
 	* The server is authoritative over movement, combat, health, deaths, respawns, and screen progression. 
 	* Attacks, blocking, weapon interactions, and player state remain synchronized between both clients. 
 	* Implement client-side prediction and interpolation to improve multiplayer responsiveness. 
-	* Implement server-side rewind for latency compensation during attacks and parries.
+	* Implement server-side rewind for latency compensation during attacks and blocks.
 
 * 35%: Procedural generation for in-between screens.
 	* Generate playable in-between screens using RD maze generation and Perlin Noise terrain generation. 
