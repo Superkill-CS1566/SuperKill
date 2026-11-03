@@ -4,7 +4,7 @@ use crate::camera::{camera_follow, SCREEN_W};
 use crate::common::{AppState, UiCamera};
 use crate::loading::despawn_with;
 use crate::game::{CurrentScreen, GameState};
-use crate::player::{move_and_collide, Controls, Player, PlayerSide, PLAYER_SPAWN_Y};
+use crate::player::{move_and_collide, Controls, NetworkControlled, Player, PlayerSide, PLAYER_SPAWN_Y};
 
 pub struct CombatPlugin;
 
@@ -68,12 +68,31 @@ const RESPAWN_ADVANCE: f32 = 220.0;
 const RESPAWN_INSET: f32 = 60.0;
 const RESPAWN_MAX_WAIT: f32 = 4.0;
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
 pub enum AttackType {
     Standing,
     /// The drop attack — see the JUMP_ / DROP_ constants below.
     Jumping,
     Crouching,
+}
+
+impl AttackType {
+    pub fn to_u8(self) -> u8 {
+        match self {
+            AttackType::Standing => 0,
+            AttackType::Jumping => 1,
+            AttackType::Crouching => 2,
+        }
+    }
+
+    pub fn from_u8(v: u8) -> Option<Self> {
+        match v {
+            0 => Some(AttackType::Standing),
+            1 => Some(AttackType::Jumping),
+            2 => Some(AttackType::Crouching),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Component)]
@@ -130,7 +149,7 @@ const CROUCH_DURATION: f32 = 0.10;
 const CROUCH_COOLDOWN: f32 = 0.18;
 const CROUCH_Y_OFFSET: f32 = -8.0;
 
-const HITSTUN_DURATION: f32 = 0.25;
+pub const HITSTUN_DURATION: f32 = 0.25;
 
 // ---------------------------------------------------------------- hitbox sizes
 // Every attack hitbox size lives here. Width is reach in front of the fighter
@@ -176,7 +195,7 @@ fn debug_kill(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut commands: Commands,
     mut priority: ResMut<Priority>,
-    players: Query<(Entity, &Transform, &PlayerSide, Option<&Dead>), With<Player>>,
+    players: Query<(Entity, &Transform, &PlayerSide, Option<&Dead>), (With<Player>, Without<NetworkControlled>)>,
 ) {
     let target = if keyboard.just_pressed(KeyCode::Digit1) {
         PlayerSide::Left
@@ -226,9 +245,9 @@ fn check_respawn(
     camera: Single<&Transform, With<UiCamera>>,
     mut dead: Query<
         (Entity, &mut Player, &mut Transform, &PlayerSide, &mut Dead),
-        Without<UiCamera>,
+        (Without<UiCamera>, Without<NetworkControlled>),
     >,
-    alive: Query<(&Transform, &PlayerSide), (With<Player>, Without<Dead>)>,
+    alive: Query<(&Transform, &PlayerSide), (With<Player>, Without<Dead>, Without<NetworkControlled>)>,
 ) {
     let half_view = SCREEN_W / 2.0;
     // a new screen is a checkpoint — anyone down comes back on arrival
@@ -314,7 +333,7 @@ fn cage_and_crush(
     camera: Single<&Transform, With<UiCamera>>,
     mut players: Query<
         (Entity, &Player, &mut Transform, &PlayerSide),
-        (Without<Dead>, Without<UiCamera>),
+        (Without<Dead>, Without<NetworkControlled>, Without<UiCamera>),
     >,
 ) {
     let half_view = SCREEN_W / 2.0;
@@ -358,7 +377,7 @@ fn cage_and_crush(
 fn spawn_attacks(
     mut commands: Commands,
     keyboard: Res<ButtonInput<KeyCode>>,
-    mut players: Query<(&mut Player, &Transform, &PlayerSide, &Controls), Without<Dead>>,
+    mut players: Query<(&mut Player, &Transform, &PlayerSide, &Controls), (Without<Dead>, Without<NetworkControlled>)>,
     hitboxes: Query<&Hitbox>,
 ) {
     for (mut player, transform, side, controls) in &mut players {
@@ -465,7 +484,7 @@ fn spawn_blocking(
     mut commands: Commands,
     time: Res<Time>,
     keyboard: Res<ButtonInput<KeyCode>>,
-    mut players: Query<(&mut Player, &Transform, &PlayerSide, &Controls), Without<Dead>>,
+    mut players: Query<(&mut Player, &Transform, &PlayerSide, &Controls), (Without<Dead>, Without<NetworkControlled>)>,
     hitboxes: Query<&Hitbox>,
 ) {
     for (mut player, transform, side, controls) in &mut players {
@@ -610,7 +629,10 @@ fn hitbox_hits(
     mut commands: Commands,
     mut priority: ResMut<Priority>,
     mut hitboxes: Query<(&mut Hitbox, &Transform)>,
-    mut players: Query<(Entity, &mut Player, &Transform, &PlayerSide), Without<Dead>>,
+    mut players: Query<
+        (Entity, &mut Player, &Transform, &PlayerSide, Has<NetworkControlled>),
+        Without<Dead>,
+    >,
 ) {
     let killed: Vec<PlayerSide> = Vec::new();
     let last_killer: Option<PlayerSide> = None;
@@ -634,7 +656,7 @@ fn hitbox_hits(
         }
         // where the attacker stands, for the respawn-distance check
         let mut attacker_x = None;
-        for (_, _, transform, side) in &mut players {
+        for (_, _, transform, side, _) in &mut players {
             if *side == hitbox.owner {
                 attacker_x = Some(transform.translation.x);
             }
@@ -652,7 +674,7 @@ fn hitbox_hits(
         let mut hit_damage = 0;
         let mut blocked = false;
 
-        for (entity, player, p_transform, side) in &players {
+        for (entity, player, p_transform, side, _) in &players {
             if *side == hitbox.owner {
                 continue;
             }
@@ -701,7 +723,7 @@ fn hitbox_hits(
             let mut block = false;
 
             // Checks if blocker is blocking the wrong direction
-            for (_, p_other, _, s_other) in &players {
+            for (_, p_other, _, s_other, _) in &players {
                 if *s_other != hitbox.owner {
                     continue;
                 }
@@ -735,7 +757,24 @@ fn hitbox_hits(
         if let Some(entity) = hit_entity {
             hitbox.has_hit = true;
 
-            if let Ok((_, mut player, _, _)) = players.get_mut(entity) {
+            // a remote fighter takes damage on their own client; we only
+            // report how much damage was dealt so the snapshot applies it
+            let mut is_remote = false;
+            for (e, _, _, _, nc) in &players {
+                if e == entity {
+                    is_remote = nc;
+                    break;
+                }
+            }
+
+            if is_remote {
+                for (_, mut attacker, _, side, _) in &mut players {
+                    if *side == hitbox.owner {
+                        attacker.damage_out += hit_damage;
+                        break;
+                    }
+                }
+            } else if let Ok((_, mut player, _, _, _)) = players.get_mut(entity) {
                 player.health = player.health.saturating_sub(hit_damage);
                 player.hitstun = Timer::from_seconds(HITSTUN_DURATION, TimerMode::Once);
                 player.velocity.x = 0.0;

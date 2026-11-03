@@ -4,7 +4,7 @@ use crate::combat::{Dead, Priority, Hitbox};
 use crate::common::{AppState, GROUND_THICKNESS, GROUND_Y, LEVEL_LEN, Platform};
 use crate::game::GameState;
 use crate::loading::{despawn_with, LoadingAssets};
-use crate::player::{Controls, Player, PlayerSide};
+use crate::player::{Controls, NetworkControlled, Player, PlayerSide};
 
 pub struct WeaponPlugin;
 
@@ -161,7 +161,7 @@ fn throw_or_pickup(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut players: Query<
         (Entity, &mut Player, &Transform, &Controls),
-        (Without<Dead>, Without<Throwing>),
+        (Without<Dead>, Without<NetworkControlled>, Without<Throwing>),
     >,
     ground_weapons: Query<(Entity, &Transform), With<GroundWeapon>>,
 ) {
@@ -345,7 +345,10 @@ fn sword_hits(
     mut commands: Commands,
     mut priority: ResMut<Priority>,
     mut swords: Query<(&mut ThrownSword, &mut Sprite, &Transform)>,
-    players: Query<(Entity, &Player, &Transform, &PlayerSide), Without<Dead>>,
+    mut players: Query<
+        (Entity, &mut Player, &Transform, &PlayerSide, Has<NetworkControlled>),
+        Without<Dead>,
+    >,
     hitboxes: Query<&Hitbox>,
 ) {
     for (mut sword, mut sprite, sword_transform) in &mut swords {
@@ -358,7 +361,12 @@ fn sword_hits(
             + sword.direction * SWORD_HITBOX_OFFSET_X;
         let sword_y = sword_transform.translation.y + SWORD_HITBOX_OFFSET_Y;
 
-        for (player_entity, player, player_transform, side) in &players {
+        // attacker entity and their kill threshold, for remote damage reports
+        let attacker_info: Option<(Entity, u8)> = players
+            .iter()
+            .find(|(_, _, _, s, _)| **s == sword.owner)
+            .map(|(e, p, _, _, _)| (e, p.max_health));
+        for (player_entity, player, player_transform, side, remote) in &mut players {
             if *side == sword.owner {
                 continue;
             }
@@ -385,10 +393,22 @@ fn sword_hits(
 
             if overlaps_x && overlaps_y {
                 if !player.is_blocking {
-                    commands
-                        .entity(player_entity)
-                        .insert((Dead::new(sword_x), Visibility::Hidden));
-                    priority.0 = Some(sword.owner);
+                    if remote {
+                        // remote fighter dies on their own client; report the
+                        // damage so the next snapshot applies it
+                        if let Some((attacker_entity, kill_health)) = attacker_info {
+                            if let Ok((_, mut attacker, _, _, _)) =
+                                players.get_mut(attacker_entity)
+                            {
+                                attacker.damage_out += kill_health;
+                            }
+                        }
+                    } else {
+                        commands
+                            .entity(player_entity)
+                            .insert((Dead::new(sword_x), Visibility::Hidden));
+                        priority.0 = Some(sword.owner);
+                    }
                 }
 
                 // stop here and play the impact frames before dropping

@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 
+use crate::combat::AttackType;
 use crate::common::AppState;
 use crate::game::GameState;
 use crate::loading::LoadingAssets;
@@ -34,6 +35,9 @@ pub struct PlayerSheets {
     crouch: Sheet,
     jump: Sheet,
     throw: Sheet,
+    attack_high: Sheet,
+    attack_mid: Sheet,
+    attack_low: Sheet,
 }
 
 /// Cell size shared by every player sheet. Must divide each PNG's width
@@ -71,6 +75,9 @@ fn load_player_sheets(
         crouch: sheet("sprites/player/player_crouching.png", 4),
         jump: sheet("sprites/player/player_jumping.png", 6),
         throw: sheet("sprites/player/player_throwing.png", 6),
+        attack_high: sheet("sprites/player/attack_high.png", 6),
+        attack_mid: sheet("sprites/player/attack_mid.png", 6),
+        attack_low: sheet("sprites/player/attack_low.png", 6),
     });
 }
 
@@ -88,6 +95,12 @@ pub enum AnimState {
     /// The two landing frames at the end of the jump sheet.
     Land,
     Throw,
+    /// Standing swing, attack_mid sheet.
+    StandingAttack,
+    /// Crouching swing, attack_low sheet.
+    CrouchAttack,
+    /// Drop attack, attack_high sheet.
+    DropAttack,
 }
 
 enum LoopMode {
@@ -111,6 +124,7 @@ impl AnimState {
             AnimState::Jump => (0, 3),
             AnimState::Land => (4, 5),
             AnimState::Throw => (0, 5),
+            AnimState::StandingAttack | AnimState::CrouchAttack | AnimState::DropAttack => (0, 5),
         }
     }
 
@@ -124,6 +138,10 @@ impl AnimState {
             AnimState::Land => 0.07,
             // must match weapon.rs, or the sword leaves on the wrong frame
             AnimState::Throw => THROW_FRAME_TIME,
+            // match combat.rs durations so the swing ends when the hitbox does
+            AnimState::StandingAttack => 0.03,
+            AnimState::CrouchAttack => 0.0167,
+            AnimState::DropAttack => 0.05,
         }
     }
 
@@ -133,6 +151,9 @@ impl AnimState {
             AnimState::Jump => LoopMode::HoldLast,
             AnimState::CrouchExit => LoopMode::OnceReverse,
             AnimState::Land | AnimState::Throw => LoopMode::Once,
+            AnimState::StandingAttack | AnimState::CrouchAttack | AnimState::DropAttack => {
+                LoopMode::Once
+            }
         }
     }
 
@@ -140,7 +161,12 @@ impl AnimState {
     fn locks(self) -> bool {
         matches!(
             self,
-            AnimState::CrouchExit | AnimState::Land | AnimState::Throw
+            AnimState::CrouchExit
+                | AnimState::Land
+                | AnimState::Throw
+                | AnimState::StandingAttack
+                | AnimState::CrouchAttack
+                | AnimState::DropAttack
         )
     }
 
@@ -151,6 +177,9 @@ impl AnimState {
             AnimState::Crouch | AnimState::CrouchExit => &sheets.crouch,
             AnimState::Jump | AnimState::Land => &sheets.jump,
             AnimState::Throw => &sheets.throw,
+            AnimState::StandingAttack => &sheets.attack_mid,
+            AnimState::CrouchAttack => &sheets.attack_low,
+            AnimState::DropAttack => &sheets.attack_high,
         }
     }
 }
@@ -208,7 +237,13 @@ fn pick_anim_state(
             }
         }
 
-        let next = if throwing {
+        let next = if let Some(attack) = player.current_attack {
+            match attack {
+                AttackType::Standing => AnimState::StandingAttack,
+                AttackType::Crouching => AnimState::CrouchAttack,
+                AttackType::Jumping => AnimState::DropAttack,
+            }
+        } else if throwing {
             AnimState::Throw
         } else if !player.is_grounded {
             AnimState::Jump
