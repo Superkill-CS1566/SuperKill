@@ -11,6 +11,9 @@ pub struct PlayerSnapshot {
     pub is_grounded: bool,
     pub facing: f32,
     pub is_crouching: bool,
+    pub health: u8,
+    pub is_attacking: bool,
+    pub is_dead: bool,
 }
 
 // stores movement controls sent by client

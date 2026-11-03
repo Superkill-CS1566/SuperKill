@@ -59,12 +59,8 @@ const RESPAWN_ADVANCE: f32 = 220.0;
 const RESPAWN_INSET: f32 = 60.0;
 const RESPAWN_MAX_WAIT: f32 = 4.0;
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum AttackType {
-    Standing,
-    Jumping,
-    Crouching,
-}
+// use the same attack types as the shared simulation
+pub use superkill::simulation::AttackType;
 
 #[derive(Component)]
 pub struct Hitbox {
