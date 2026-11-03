@@ -23,7 +23,8 @@ impl Plugin for WeaponPlugin {
                 )
                     .chain()
                     .run_if(in_state(AppState::InGame))
-                    .run_if(in_state(GameState::Playing)),
+                    .run_if(in_state(GameState::Playing))
+                    .run_if(crate::common::offline_only),
             )
             .add_systems(
                 Update,

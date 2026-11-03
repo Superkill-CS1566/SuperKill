@@ -12,7 +12,7 @@ mod player;
 mod procedural_gen_menu;
 mod procedural_generation;
 mod procedural_test;
-mod protocol;
+use superkill::protocol;
 mod recursive_generation;
 mod recursive_test;
 mod settings;

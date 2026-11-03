@@ -23,6 +23,9 @@ impl Plugin for NetworkPlugin {
                     // send controls only while playing
                     send_player_input.run_if(in_state(AppState::InGame)),
                     apply_server_messages,
+                    draw_server_attacks
+                        .run_if(in_state(AppState::InGame))
+                        .after(apply_server_messages),
                 ),
             );
     }
@@ -142,38 +145,41 @@ fn start_network_client(mut commands: Commands) {
     });
 }
 
-// read keyboard input and queue it for the server
+// read this client's controls and send them to the server
 fn send_player_input(
     keyboard: Res<ButtonInput<KeyCode>>,
     network: Res<NetworkClient>,
     local_player: Res<LocalPlayerId>,
 ) {
-
     if local_player.0.is_none() {
         return;
     }
 
-    let mut movement_x = 0.0;
+    let (left, right, jump, crouch, attack) = (
+        KeyCode::KeyA,
+        KeyCode::KeyD,
+        KeyCode::KeyW,
+        KeyCode::KeyS,
+        KeyCode::KeyG,
+    );
 
-    if keyboard.pressed(KeyCode::KeyA) {
+    let mut movement_x = 0.0;
+    if keyboard.pressed(left) {
         movement_x -= 1.0;
     }
-
-    if keyboard.pressed(KeyCode::KeyD) {
+    if keyboard.pressed(right) {
         movement_x += 1.0;
     }
 
     let input = PlayerInput {
         movement_x,
-        movement_y: 0.0, 
-        jump: keyboard.just_pressed(KeyCode::KeyW),
-        crouch: keyboard.pressed(KeyCode::KeyS),
-        attack: keyboard.just_pressed(KeyCode::KeyG),
+        movement_y: 0.0,
+        jump: keyboard.just_pressed(jump),
+        crouch: keyboard.pressed(crouch),
+        attack: keyboard.just_pressed(attack),
     };
 
-    let message = ClientMessage::PlayerInput(input);
-
-    if let Err(error) = network.outgoing.try_send(message) {
+    if let Err(error) = network.outgoing.try_send(ClientMessage::PlayerInput(input)) {
         println!("Failed to queue player input: {error}");
     }
 }
@@ -181,7 +187,7 @@ fn send_player_input(
 // apply server-controlled player states to the Bevy world
 fn apply_server_messages(
     network: Res<NetworkClient>,
-    mut player_query: Query<(&PlayerSide, &mut Player, &mut Transform)>,
+    mut player_query: Query<(&PlayerSide, &mut Player, &mut Transform, &mut Visibility)>,
     mut local_player: ResMut<LocalPlayerId>,
 ) {
     let Ok(mut incoming) = network.incoming.lock() else {
@@ -204,7 +210,7 @@ fn apply_server_messages(
             }
 
             ServerMessage::GameState { players: snapshots } => {
-                for (side, mut player, mut transform) in &mut player_query {
+                for (side, mut player, mut transform, mut visibility) in &mut player_query {
                     let player_id = match side {
                         PlayerSide::Left => 1,
                         PlayerSide::Right => 2,
@@ -220,6 +226,14 @@ fn apply_server_messages(
                         player.is_grounded = snapshot.is_grounded;
                         player.velocity = Vec2::new(snapshot.velocity_x, snapshot.velocity_y);
                         player.facing = snapshot.facing;
+                        player.health = snapshot.health;
+                        player.current_attack = snapshot.current_attack;
+
+                        *visibility = if snapshot.is_dead {
+                            Visibility::Hidden
+                        } else {
+                            Visibility::Inherited
+                        };
 
                         transform.translation.x = snapshot.position_x;
                         transform.translation.y = snapshot.position_y;
@@ -227,5 +241,38 @@ fn apply_server_messages(
                 }
             }
         }
+    }
+}
+
+// draw attack hitboxes only for a connected multiplayer client
+fn draw_server_attacks(
+    local_player: Res<LocalPlayerId>,
+    players: Query<(&Player, &Transform)>,
+    mut gizmos: Gizmos,
+) {
+    if local_player.0.is_none() {
+        return;
+    }
+
+    for (player, transform) in &players {
+
+        // skip players without an active-reported attack
+        let Some(attack) = player.current_attack else {
+            continue;
+        };
+
+        // place the attack box in front of the player using shared dimensions
+        let (width, height, y_offset) = attack.hitbox_dimensions();
+        let center = Vec2::new(
+            transform.translation.x + player.facing * (player.width + width) / 2.0,
+            transform.translation.y + y_offset,
+        );
+
+        // show the box; hit detection still happens on the server
+        gizmos.rect_2d(
+            center,
+            Vec2::new(width, height),
+            Color::srgb(0.9, 0.15, 0.15),
+        );
     }
 }

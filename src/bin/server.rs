@@ -116,6 +116,10 @@ async fn main() -> io::Result<()> {
                         if let Some(&player_id) = players.get(&addr) {
                             let index = (player_id - 1) as usize;
 
+                            if input.movement_x != 0.0 || input.attack {
+                                println!("Player {player_id}: movement={}, attack={}", input.movement_x, input.attack);
+                            }
+
                             // save the latest controls and hold jump until the next tick
                             pending_jumps[index] |= input.jump;
                             pending_attacks[index] |= input.attack;
@@ -154,6 +158,16 @@ async fn main() -> io::Result<()> {
 
                 // advance both players once at the fixed server rate
                 game.step([&frame_inputs[0], &frame_inputs[1]]);
+
+                if frame_inputs[0].attack || frame_inputs[1].attack {
+                println!(
+                    "P1 attack={:?}, health={}; P2 attack={:?}, health={}",
+                    game.players[0].current_attack,
+                    game.players[0].health,
+                    game.players[1].current_attack,
+                    game.players[1].health,
+                );
+}
                 pending_attacks = [false; 2];
                 pending_jumps = [false; 2];
 

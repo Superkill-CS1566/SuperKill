@@ -55,3 +55,8 @@ pub fn despawn_ui_camera(mut commands: Commands, cameras: Query<Entity, With<UiC
         commands.entity(entity).despawn();
     }
 }
+
+// Local gameplay systems run only when this game is not connected as a player.
+pub fn offline_only(local_player: Res<LocalPlayerId>) -> bool {
+    local_player.0.is_none()
+}

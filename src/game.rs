@@ -21,6 +21,7 @@ impl Plugin for GamePlugin {
                     screen_transition
                         .run_if(in_state(AppState::InGame))
                         .run_if(in_state(GameState::Playing))
+                        .run_if(crate::common::offline_only)
                         .after(move_and_collide),
                     toggle_pause.run_if(in_state(AppState::InGame)),
                     pause_menu_interaction

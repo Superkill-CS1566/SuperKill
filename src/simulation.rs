@@ -16,13 +16,7 @@ const JUMP_ATTACK_MIN_HEIGHT: f32 = 60.0;
 const MAX_HEALTH: u8 = 2;
 const HITSTUN_TICKS: u16 = 15;
 
-// melee attack depending on player's stance
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AttackType {
-    Standing,
-    Jumping,
-    Crouching,
-}
+pub use crate::protocol::AttackType;
 
 // specifications of attack
 struct AttackSpec {
@@ -36,6 +30,7 @@ struct AttackSpec {
 
 // provide each attack's values, durations are measured in server ticks
 impl AttackType {
+
     fn spec(self) -> AttackSpec {
         match self {
             AttackType::Standing => AttackSpec {
@@ -51,6 +46,11 @@ impl AttackType {
                 width: 70.0, height: 16.0, y_offset: -8.0,
             },
         }
+    }
+
+    pub fn hitbox_dimensions(self) -> (f32, f32, f32) {
+        let spec = self.spec();
+        (spec.width, spec.height, spec.y_offset)
     }
 }
 
@@ -238,7 +238,7 @@ impl PlayerState {
             facing: self.facing,
             is_crouching: self.is_crouching,
             health: self.health,
-            is_attacking: self.current_attack.is_some(),
+            current_attack: self.current_attack,
             is_dead: self.health == 0,
         }
     }

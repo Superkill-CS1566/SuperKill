@@ -17,20 +17,23 @@ impl Plugin for CombatPlugin {
                 (debug_kill, check_respawn)
                     .chain()
                     .run_if(in_state(AppState::InGame))
-                    .run_if(in_state(GameState::Playing)),
+                    .run_if(in_state(GameState::Playing))
+                    .run_if(crate::common::offline_only),
             )
             .add_systems(
                 Update,
                 (spawn_attacks, spawn_blocking, update_hitboxes, hitbox_hits, update_attack_state)
                     .chain()
                     .run_if(in_state(AppState::InGame))
-                    .run_if(in_state(GameState::Playing)),
+                    .run_if(in_state(GameState::Playing))
+                    .run_if(crate::common::offline_only),
             )
             .add_systems(
                 Update,
                 cage_and_crush
                     .run_if(in_state(AppState::InGame))
                     .run_if(in_state(GameState::Playing))
+                    .run_if(crate::common::offline_only)
                     .after(camera_follow),
             )
             .add_systems(OnExit(AppState::InGame), despawn_with::<Hitbox>);

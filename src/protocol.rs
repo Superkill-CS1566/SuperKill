@@ -1,5 +1,12 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AttackType {
+    Standing,
+    Jumping,
+    Crouching,
+}
+
 // stores one player's current state sent by the server
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct PlayerSnapshot {
@@ -12,7 +19,7 @@ pub struct PlayerSnapshot {
     pub facing: f32,
     pub is_crouching: bool,
     pub health: u8,
-    pub is_attacking: bool,
+    pub current_attack: Option<AttackType>,
     pub is_dead: bool,
 }
 
