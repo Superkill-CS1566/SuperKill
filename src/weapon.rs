@@ -366,7 +366,7 @@ fn sword_hits(
             .iter()
             .find(|(_, _, _, s, _)| **s == sword.owner)
             .map(|(e, p, _, _, _)| (e, p.max_health));
-        for (player_entity, player, player_transform, side, remote) in &mut players {
+        for (player_entity, player, player_transform, side, remote) in &players {
             if *side == sword.owner {
                 continue;
             }
@@ -378,9 +378,19 @@ fn sword_hits(
             };
             let mut px = player_transform.translation.x;
             let py = player_transform.translation.y;
+            let mut facing_same = false;
+            
+            for (_, p_other, _, s_other, _) in &players {
+                if *s_other != sword.owner {
+                    continue;
+                }
+                if player.facing == p_other.facing {
+                    facing_same = true;
+                }
+            }
             
             for hitbox in &hitboxes {
-                if hitbox.is_attack {
+                if hitbox.is_attack || facing_same {
                     continue;
                 }
                 px += hitbox.width * player.facing;
@@ -392,7 +402,7 @@ fn sword_hits(
                 && (sword_y + SWORD_HITBOX_H / 2.0) >= (py - player_h / 2.0);
 
             if overlaps_x && overlaps_y {
-                if !player.is_blocking {
+                if !player.is_blocking || facing_same {
                     if remote {
                         // remote fighter dies on their own client; report the
                         // damage so the next snapshot applies it
