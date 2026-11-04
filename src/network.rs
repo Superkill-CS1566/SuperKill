@@ -10,6 +10,9 @@ use tokio::sync::mpsc;
 use std::sync::Mutex;
 use crate::player::{NetworkControlled, Player, PlayerSide};
 
+/// The port the server listens on.
+const SERVER_PORT: u16 = 5000;
+
 pub struct NetworkPlugin;
 
 impl Plugin for NetworkPlugin {
@@ -27,6 +30,33 @@ impl Plugin for NetworkPlugin {
     }
 }
 
+/// Which server to connect to: the argument after `--online`, or this machine
+/// if none was given. A bare address like `192.168.1.50` gets the default port.
+///
+///   cargo run -- --online                   connects to this machine
+///   cargo run -- --online 192.168.1.50      connects to another device
+fn server_address() -> String {
+    let args: Vec<String> = std::env::args().collect();
+    let mut address = String::from("127.0.0.1");
+
+    for i in 0..args.len() {
+        if args[i] != "--online" {
+            continue;
+        }
+        if let Some(next) = args.get(i + 1) {
+            if !next.starts_with("--") {
+                address = next.clone();
+            }
+        }
+    }
+
+    if address.contains(':') {
+        address
+    } else {
+        format!("{address}:{SERVER_PORT}")
+    }
+}
+
 // stores channels used to communicate with the Tokio network thread
 #[derive(Resource)]
 pub struct NetworkClient {
@@ -37,6 +67,9 @@ pub struct NetworkClient {
 
 // starts the UDP client on a separate Tokio thread
 fn start_network_client(mut commands: Commands) {
+
+    // read before the thread starts, then moved into it
+    let server_address = server_address();
 
     let (outgoing_sender, mut outgoing_receiver) =
         mpsc::channel::<ClientMessage>(64);
@@ -60,14 +93,16 @@ fn start_network_client(mut commands: Commands) {
         runtime.block_on(async {
             println!("Tokio network runtime started");
 
-            let socket = UdpSocket::bind("127.0.0.1:0").await
+            // 0.0.0.0 rather than 127.0.0.1, so the socket can reach other
+            // machines and not just this one
+            let socket = UdpSocket::bind("0.0.0.0:0").await
                 .expect("Failed to bind client UDP socket");
 
-            let server_address = "127.0.0.1:5000";
+            println!("Connecting to server at {server_address}");
 
             let connect_msg = ClientMessage::Connect;
             let bytes = to_allocvec(&connect_msg).expect("Failed to serialize Connect");
-            let _ = socket.send_to(&bytes, server_address).await
+            let _ = socket.send_to(&bytes, server_address.as_str()).await
                 .expect("Failed to send Connect message");
 
             let client_address = socket.local_addr()
@@ -83,7 +118,7 @@ fn start_network_client(mut commands: Commands) {
                         match to_allocvec(&outgoing_message) {
                             Ok(bytes) => {
                                 if let Err(error) =
-                                    socket.send_to(&bytes, server_address).await
+                                    socket.send_to(&bytes, server_address.as_str()).await
                                 {
                                     println!("Failed to send message: {error}");
                                 }

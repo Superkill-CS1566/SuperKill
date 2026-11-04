@@ -6,7 +6,6 @@ use bevy::{prelude::*, window::{EnabledButtons, PresentMode}};
 use superkill::{common::AppState, credits::CreditsPlugin, game::GamePlugin, loading::LoadingPlugin, main_menu::MainMenuPlugin, settings::SettingsPlugin, test::TestPlugin};
 use superkill::camera::CameraPlugin;
 use superkill::combat::CombatPlugin;
-use superkill::network::NetworkPlugin;
 use superkill::player::PlayerPlugin;
 use superkill::procedural_test::ProceduralTestPlugin;
 use superkill::perlin_noise_test::PerlinNoiseTestPlugin;
@@ -36,7 +35,7 @@ fn main() {
         }))
         .init_state::<AppState>()
         // changed this to just add the plugins
-        .add_plugins((MainMenuPlugin, CreditsPlugin, SettingsPlugin, TestPlugin, LoadingPlugin, NetworkPlugin))
+        .add_plugins((MainMenuPlugin, CreditsPlugin, SettingsPlugin, TestPlugin, LoadingPlugin))
         // in-game: level + fighters + camera + combat
         .add_plugins((GamePlugin, PlayerPlugin, CameraPlugin, CombatPlugin, GameOverPlugin, WeaponPlugin, AnimationPlugin, HealthVisualsPlugin))
         .add_plugins(ProceduralTestPlugin)
