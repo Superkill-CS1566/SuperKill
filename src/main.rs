@@ -1,45 +1,22 @@
-mod camera;
-mod combat;
-mod common;
-mod credits;
-mod game;
-mod health_visuals;
-mod loading;
-mod main_menu;
-mod network;
-mod perlin_noise;
-mod perlin_noise_test;
-mod player;
-mod procedural_gen_menu;
-mod procedural_generation;
-mod procedural_test;
-mod protocol;
-mod recursive_generation;
-mod recursive_test;
-mod settings;
-mod test;
-mod game_over;
-mod weapon;
-mod animation;
-mod simplerng;
-mod level_select;
+// The game binary. All of the modules now live in the library (src/lib.rs),
+// so this file only builds the app from them.
 
 use bevy::{prelude::*, window::{EnabledButtons, PresentMode}};
 
-use crate::{common::AppState, credits::CreditsPlugin, game::GamePlugin, loading::LoadingPlugin, main_menu::MainMenuPlugin, settings::SettingsPlugin, test::TestPlugin};
-use crate::camera::CameraPlugin;
-use crate::combat::CombatPlugin;
-use crate::network::NetworkPlugin;
-use crate::player::PlayerPlugin;
-use crate::procedural_test::ProceduralTestPlugin;
-use crate::perlin_noise_test::PerlinNoiseTestPlugin;
-use crate::procedural_gen_menu::ProcGenPlugin;
-use crate::recursive_test::RecursiveTestPlugin;
-use crate::game_over::GameOverPlugin;
-use crate::weapon::WeaponPlugin;
-use crate::animation::AnimationPlugin;
-use crate::level_select::LevelSelectPlugin;
-use crate::health_visuals::HealthVisualsPlugin;
+use superkill::{common::AppState, credits::CreditsPlugin, game::GamePlugin, loading::LoadingPlugin, main_menu::MainMenuPlugin, settings::SettingsPlugin, test::TestPlugin};
+use superkill::camera::CameraPlugin;
+use superkill::combat::CombatPlugin;
+use superkill::network::NetworkPlugin;
+use superkill::player::PlayerPlugin;
+use superkill::procedural_test::ProceduralTestPlugin;
+use superkill::perlin_noise_test::PerlinNoiseTestPlugin;
+use superkill::procedural_gen_menu::ProcGenPlugin;
+use superkill::recursive_test::RecursiveTestPlugin;
+use superkill::game_over::GameOverPlugin;
+use superkill::weapon::WeaponPlugin;
+use superkill::animation::AnimationPlugin;
+use superkill::level_select::LevelSelectPlugin;
+use superkill::health_visuals::HealthVisualsPlugin;
 
 fn main() {
     App::new()
