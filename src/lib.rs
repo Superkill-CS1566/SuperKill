@@ -13,7 +13,7 @@ pub mod health_visuals;
 pub mod level_select;
 pub mod loading;
 pub mod main_menu;
-// pub mod network;  // switched off while online play is rebuilt on the simulation
+pub mod network;
 pub mod perlin_noise;
 pub mod perlin_noise_test;
 pub mod player;

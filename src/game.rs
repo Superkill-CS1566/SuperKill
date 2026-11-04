@@ -4,7 +4,9 @@ use bevy::camera::visibility::RenderLayers;
 use crate::common::{AppState, BACKGROUND_LAYER};
 use crate::level_select::{LevelType, SelectedLevel};
 use crate::loading::{LoadingAssets, despawn_with};
+use crate::network::OnlineSession;
 use crate::player::PendingInputs;
+use crate::protocol::ONLINE_LEVEL;
 use crate::sim::{
     MatchState, PlayerSide, SCREEN_COUNT, START_SCREEN, TICK_SECONDS, Terrain, TerrainKind,
     ThrownSword, DEFAULT_SEED,
@@ -20,11 +22,13 @@ impl Plugin for GamePlugin {
             .insert_resource(Time::<Fixed>::from_seconds(TICK_SECONDS as f64))
             .add_systems(Startup, load_level)
             .add_systems(OnEnter(AppState::InGame), (setup_game, setup_level))
+            // online, the server runs the match instead — see network.rs
             .add_systems(
                 FixedUpdate,
                 step_match
                     .run_if(in_state(AppState::InGame))
-                    .run_if(resource_exists::<Match>),
+                    .run_if(resource_exists::<Match>)
+                    .run_if(not(resource_exists::<OnlineSession>)),
             )
             .add_systems(
                 Update,
@@ -231,16 +235,22 @@ fn update_background(
 fn setup_game(
     mut commands: Commands,
     selected_level: Res<SelectedLevel>,
+    online: Option<Res<OnlineSession>>,
     mut winner: ResMut<Winner>,
     mut next_game_state: ResMut<NextState<GameState>>,
 ) {
     next_game_state.set(GameState::Playing);
     winner.0 = None;
 
-    let kind = match selected_level.0 {
-        LevelType::Flat => TerrainKind::Flat,
-        LevelType::Noise => TerrainKind::Noise,
-        LevelType::Maze => TerrainKind::Maze,
+    // online, everyone must collide with the same ground the server does
+    let kind = if online.is_some() {
+        ONLINE_LEVEL
+    } else {
+        match selected_level.0 {
+            LevelType::Flat => TerrainKind::Flat,
+            LevelType::Noise => TerrainKind::Noise,
+            LevelType::Maze => TerrainKind::Maze,
+        }
     };
     let terrain = Terrain::generate(kind, DEFAULT_SEED);
 
