@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use bevy::camera::visibility::RenderLayers;
 
+use std::time::Instant;
 use crate::common::{AppState, BACKGROUND_LAYER};
 use crate::level_select::{LevelType, SelectedLevel};
 use crate::loading::{LoadingAssets, despawn_with};
@@ -41,6 +42,12 @@ impl Plugin for GamePlugin {
                         .run_if(in_state(AppState::InGame))
                         .run_if(in_state(GameState::Paused)),
                 ),
+            )
+            .add_systems(
+                Update,
+                time_presses
+                    .run_if(in_state(AppState::InGame))
+                    .run_if(resource_exists::<Match>)
             )
             .add_systems(
                 OnExit(AppState::InGame),
@@ -417,5 +424,34 @@ fn despawn_game(
 ) {
     for entity in &query {
         despawn_tree(&mut commands, entity, &children);
+    }
+}
+
+// Debug: run with --latency-test, only checks for D inputs, letting the
+// fighter stop in between. Prints each press-to-screen time.
+fn time_presses(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    game: Res<Match>,
+    mut started: Local<Option<Instant>>,
+    mut total: Local<f64>,
+    mut count: Local<u32>,
+) {
+    let was_still = game.previous.fighters.iter().all(|f| f.vx == 0.0);
+    let moving = game.state.fighters.iter().any(|f| f.vx != 0.0);
+
+    // start: D pressed while everyone was standing still
+    if keyboard.just_pressed(KeyCode::KeyD) && was_still && started.is_none() {
+        *started = Some(Instant::now());
+    }
+
+    // stop: the first frame a fighter is shown moving
+    if let Some(start) = *started {
+        if moving {
+            let ms = start.elapsed().as_secs_f64() * 1000.0;
+            *total += ms;
+            *count += 1;
+            println!("press {}: {ms:.1} ms (average {:.1} ms)", *count, *total / *count as f64);
+            *started = None;
+        }
     }
 }
