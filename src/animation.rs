@@ -1,11 +1,11 @@
 use bevy::prelude::*;
 
-use crate::combat::AttackType;
 use crate::common::AppState;
-use crate::game::GameState;
+use crate::game::{GameState, Match};
 use crate::loading::LoadingAssets;
-use crate::player::Player;
-use crate::weapon::{Throwing, THROW_FRAME_TIME};
+use crate::player::FighterView;
+use crate::sim::fighter::THROW_FRAME_SECONDS;
+use crate::sim::AttackType;
 
 pub struct AnimationPlugin;
 
@@ -16,7 +16,8 @@ impl Plugin for AnimationPlugin {
             (pick_anim_state, advance_anim)
                 .chain()
                 .run_if(in_state(AppState::InGame))
-                .run_if(in_state(GameState::Playing)),
+                .run_if(in_state(GameState::Playing))
+                .run_if(resource_exists::<Match>),
         );
     }
 }
@@ -46,7 +47,7 @@ const PLAYER_CELL_W: u32 = 100;
 const PLAYER_CELL_H: u32 = 100;
 
 /// How large the character is drawn, in world units. Keep the same ratio as
-/// the cell above. The collision box stays 40x60 regardless.
+/// the cell above. The collision box doesn't change with this.
 pub const PLAYER_SPRITE_W: f32 = 100.0;
 pub const PLAYER_SPRITE_H: f32 = 100.0;
 
@@ -136,9 +137,9 @@ impl AnimState {
             AnimState::CrouchExit => 0.04,
             AnimState::Jump => 0.07,
             AnimState::Land => 0.07,
-            // must match weapon.rs, or the sword leaves on the wrong frame
-            AnimState::Throw => THROW_FRAME_TIME,
-            // match combat.rs durations so the swing ends when the hitbox does
+            // must match the simulation's throw, or the sword leaves on the wrong frame
+            AnimState::Throw => THROW_FRAME_SECONDS,
+            // match combat durations so the swing ends when the hitbox does
             AnimState::StandingAttack => 0.03,
             AnimState::CrouchAttack => 0.0167,
             AnimState::DropAttack => 0.05,
@@ -223,37 +224,39 @@ impl PlayerAnim {
 // Decides which animation should be playing, and swaps sheets on a change.
 fn pick_anim_state(
     sheets: Res<PlayerSheets>,
-    mut players: Query<(&Player, &mut PlayerAnim, &mut Sprite, Has<Throwing>)>,
+    game: Res<Match>,
+    mut players: Query<(&FighterView, &mut PlayerAnim, &mut Sprite)>,
 ) {
-    for (player, mut anim, mut sprite, throwing) in &mut players {
+    for (view, mut anim, mut sprite) in &mut players {
+        let fighter = game.state.fighter(view.0);
         let previous = anim.state;
 
         // a one-shot holds the screen until it ends — except that leaving the
         // ground cancels a landing
         if previous.locks() && !anim.finished {
-            let jump_cancels_land = previous == AnimState::Land && !player.is_grounded;
+            let jump_cancels_land = previous == AnimState::Land && !fighter.grounded;
             if !jump_cancels_land {
                 continue;
             }
         }
 
-        let next = if let Some(attack) = player.current_attack {
+        let next = if let Some(attack) = fighter.attack {
             match attack {
                 AttackType::Standing => AnimState::StandingAttack,
                 AttackType::Crouching => AnimState::CrouchAttack,
                 AttackType::Jumping => AnimState::DropAttack,
             }
-        } else if throwing {
+        } else if fighter.throw_ticks.is_some() {
             AnimState::Throw
-        } else if !player.is_grounded {
+        } else if !fighter.grounded {
             AnimState::Jump
-        } else if player.is_crouching {
+        } else if fighter.crouching {
             AnimState::Crouch
         } else if previous == AnimState::Jump {
             AnimState::Land
         } else if previous == AnimState::Crouch {
             AnimState::CrouchExit
-        } else if player.velocity.x != 0.0 {
+        } else if fighter.vx != 0.0 {
             AnimState::Run
         } else {
             AnimState::Idle
@@ -298,10 +301,14 @@ fn pick_anim_state(
 }
 
 // Steps the current animation and writes the atlas index.
-fn advance_anim(time: Res<Time>, mut players: Query<(&Player, &mut PlayerAnim, &mut Sprite)>) {
-    for (player, mut anim, mut sprite) in &mut players {
+fn advance_anim(
+    time: Res<Time>,
+    game: Res<Match>,
+    mut players: Query<(&FighterView, &mut PlayerAnim, &mut Sprite)>,
+) {
+    for (view, mut anim, mut sprite) in &mut players {
         // sheets are drawn facing right
-        sprite.flip_x = player.facing < 0.0;
+        sprite.flip_x = game.state.fighter(view.0).facing < 0.0;
 
         if anim.finished {
             continue;

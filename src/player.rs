@@ -1,63 +1,50 @@
+use bevy::input::InputSystems;
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
 
-use crate::combat::{AttackType, Dead, DROP_SPEED};
-use crate::common::{AppState, Platform, GROUND_THICKNESS, GROUND_Y, LEVEL_LEN, WIN_H};
-use crate::game::GameState;
-use crate::loading::despawn_with;
 use crate::animation::{PlayerAnim, PlayerSheets, PLAYER_SPRITE_H, PLAYER_SPRITE_W};
+use crate::common::AppState;
+use crate::game::{GameState, Match};
+use crate::loading::despawn_with;
+use crate::sim::fighter::{CROUCH_HEIGHT, PLAYER_HEIGHT, PLAYER_SPAWN_Y};
+use crate::sim::Input;
 use crate::weapon::ShowHitboxes;
+
+// The fighters' rules live in the simulation now (src/sim/fighter.rs). This
+// file turns the keyboard into simulation input, and draws each fighter where
+// the simulation says they are.
+
+pub use crate::sim::PlayerSide;
 
 pub struct PlayerPlugin;
 
-/* Temporary remove from Plugin for testing
-.add_systems(
-    Update,
-    (player_movement, apply_gravity, move_and_collide)
-        .chain()
-        .run_if(in_state(AppState::InGame))
-        .run_if(in_state(GameState::Playing)),
-     )
-*/
-
 impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(OnEnter(AppState::InGame), spawn_players)
+        app.init_resource::<PendingInputs>()
+            .add_systems(OnEnter(AppState::InGame), (spawn_players, reset_inputs))
+            // read the keys as early in the frame as possible, so the
+            // simulation tick later this same frame already sees them
             .add_systems(
-                Update,
-                (player_movement, apply_gravity, move_and_collide, align_player_sprite)
-                    .chain()
+                PreUpdate,
+                collect_input
+                    .after(InputSystems)
                     .run_if(in_state(AppState::InGame))
                     .run_if(in_state(GameState::Playing)),
             )
             .add_systems(
                 Update,
-                draw_player_hitboxes.run_if(in_state(AppState::InGame)),
+                (sync_fighter_views, align_player_sprite, draw_player_hitboxes)
+                    .chain()
+                    .run_if(in_state(AppState::InGame))
+                    .run_if(resource_exists::<Match>),
             )
-            .add_systems(OnExit(AppState::InGame), despawn_with::<Player>);
+            .add_systems(OnExit(AppState::InGame), despawn_with::<FighterView>);
     }
 }
 
-// which fighter this is — left starts on the left, right on the right
-#[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
-pub enum PlayerSide {
-    Left,
-    Right,
-}
-
-// marks the remote fighter driven by network snapshots instead of local input
+/// The sprite that draws one fighter.
 #[derive(Component)]
-pub struct NetworkControlled;
-
-impl PlayerSide {
-    pub fn from_player_id(id: u8) -> Option<Self> {
-        match id {
-            1 => Some(PlayerSide::Left),
-            2 => Some(PlayerSide::Right),
-            _ => None,
-        }
-    }
-}
+pub struct FighterView(pub PlayerSide);
 
 // 每个玩家自己的按键绑定
 #[derive(Component)]
@@ -71,359 +58,119 @@ pub struct Controls {
     pub block: KeyCode,
 }
 
-// 玩家组件
-#[derive(Component)]
-pub struct Player {
-    pub speed: f32,
-    pub jump_force: f32,
-    pub is_grounded: bool,
-    pub is_crouching: bool,
-    pub prev_crouching: bool,
-    pub velocity: Vec2,
-    pub facing: f32,
-    pub width: f32,
-    pub height: f32,
-    pub crouch_height: f32,
-    pub health: u8,
-    pub max_health: u8,
-    pub attack_cooldown: Timer,
-    pub hitstun: Timer,
-    pub current_attack: Option<AttackType>,
-    pub has_weapon: bool,
-    pub is_blocking: bool,
-    pub block_cooldown: Timer,
-    /// Seconds since leaving the ground. A drop attack needs enough of it.
-    pub air_time: f32,
-    /// Mid drop attack — being pulled straight down.
-    pub is_dropping: bool,
-    /// The beat after a drop lands, when the fighter can't act.
-    pub landing_lag: Timer,
-    /// Damage dealt to the remote fighter since the last snapshot; sent to
-    /// the server so the other client applies it. Zero in offline play.
-    pub damage_out: u8,
-}
-
-impl Player {
-    /// Can't act right now — recoiling from a hit, or stuck landing a drop.
-    pub fn is_stunned(&self) -> bool {
-        !self.hitstun.is_finished() || !self.landing_lag.is_finished()
+fn controls_for(side: PlayerSide) -> Controls {
+    match side {
+        PlayerSide::Left => Controls {
+            left: KeyCode::KeyA,
+            right: KeyCode::KeyD,
+            jump: KeyCode::KeyW,
+            crouch: KeyCode::KeyS,
+            attack: KeyCode::KeyG,
+            throw: KeyCode::KeyT,
+            block: KeyCode::KeyB,
+        },
+        PlayerSide::Right => Controls {
+            left: KeyCode::ArrowLeft,
+            right: KeyCode::ArrowRight,
+            jump: KeyCode::ArrowUp,
+            crouch: KeyCode::ArrowDown,
+            attack: KeyCode::KeyH,
+            throw: KeyCode::KeyY,
+            block: KeyCode::KeyN,
+        },
     }
 }
 
-const GRAVITY: f32 = 1800.0;
-const TERMINAL_VELOCITY: f32 = -1200.0;
+// ---------------------------------------------------------------- input
 
-// Player Constants
-const PLAYER_WIDTH: f32 = 30.0;
-const PLAYER_HEIGHT: f32 = 95.0;
-const CROUCH_HEIGHT: f32 = 35.0;
-const PLAYER_SPEED: f32 = 320.0;
-const JUMP_FORCE: f32 = 620.0;
-// Because the blocking entity despawns along with its components,
-// this is a player constant
-const BLOCK_COOLDOWN: f32 = 1.5;
+/// Each fighter's input for the next simulation tick.
+///
+/// Held keys are read fresh every frame. Presses are kept until a tick uses
+/// them, so a tap still counts even when a frame passes with no tick in it.
+#[derive(Resource, Default)]
+pub struct PendingInputs(pub [Input; 2]);
 
-// how far from center each fighter starts
-const SPAWN_OFFSET_X: f32 = 200.0;
-pub const PLAYER_SPAWN_Y: f32 = GROUND_Y + GROUND_THICKNESS / 2.0 + PLAYER_HEIGHT / 2.0;
-
-impl PlayerSide {
-    pub fn spawn_x(self) -> f32 {
-        match self {
-            PlayerSide::Left => -SPAWN_OFFSET_X,
-            PlayerSide::Right => SPAWN_OFFSET_X,
+impl PendingInputs {
+    /// Hand the inputs to a tick, clearing the presses it has now used up.
+    pub fn take(&mut self) -> [Input; 2] {
+        let inputs = self.0;
+        for input in &mut self.0 {
+            input.jump = false;
+            input.attack = false;
+            input.block = false;
+            input.throw = false;
         }
-    }
-
-    pub fn other(self) -> Self {
-        match self {
-            PlayerSide::Left => PlayerSide::Right,
-            PlayerSide::Right => PlayerSide::Left,
-        }
-    }
-
-    // left fighter wins by pushing right, right fighter by pushing left
-    pub fn advance_dir(self) -> f32 {
-        match self {
-            PlayerSide::Left => 1.0,
-            PlayerSide::Right => -1.0,
-        }
-    }
-
-    // Label for win screen
-    pub fn label(self) -> &'static str {
-        match self {
-            PlayerSide::Left => "Player 1",
-            PlayerSide::Right => "Player 2",
-        }
-    }
-
-    fn controls(self) -> Controls {
-        match self {
-            PlayerSide::Left => Controls {
-                left: KeyCode::KeyA,
-                right: KeyCode::KeyD,
-                jump: KeyCode::KeyW,
-                crouch: KeyCode::KeyS,
-                attack: KeyCode::KeyG,
-                throw: KeyCode::KeyT,
-                block: KeyCode::KeyB,
-            },
-            PlayerSide::Right => Controls {
-                left: KeyCode::ArrowLeft,
-                right: KeyCode::ArrowRight,
-                jump: KeyCode::ArrowUp,
-                crouch: KeyCode::ArrowDown,
-                attack: KeyCode::KeyH,
-                throw: KeyCode::KeyY,
-                block: KeyCode::KeyN,
-            },
-        }
+        inputs
     }
 }
+
+fn reset_inputs(mut pending: ResMut<PendingInputs>) {
+    *pending = PendingInputs::default();
+}
+
+fn collect_input(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut pending: ResMut<PendingInputs>,
+    players: Query<(&FighterView, &Controls)>,
+) {
+    for (view, controls) in &players {
+        let input = &mut pending.0[view.0.index()];
+
+        // held — whatever the keys are doing right now
+        input.left = keyboard.pressed(controls.left);
+        input.right = keyboard.pressed(controls.right);
+        input.crouch = keyboard.pressed(controls.crouch);
+
+        // presses — kept until a tick takes them
+        input.jump |= keyboard.just_pressed(controls.jump);
+        input.attack |= keyboard.just_pressed(controls.attack);
+        input.block |= keyboard.just_pressed(controls.block);
+        input.throw |= keyboard.just_pressed(controls.throw);
+    }
+}
+
+// ---------------------------------------------------------------- drawing
 
 fn spawn_players(mut commands: Commands, sheets: Res<PlayerSheets>) {
     for side in [PlayerSide::Left, PlayerSide::Right] {
-        spawn_player(&mut commands, &sheets, side);
+        let (image, atlas) = PlayerAnim::starting_sheet(&sheets);
+
+        commands.spawn((
+            Sprite {
+                image,
+                texture_atlas: Some(atlas),
+                custom_size: Some(Vec2::new(PLAYER_SPRITE_W, PLAYER_SPRITE_H)),
+                ..default()
+            },
+            Anchor::CENTER,
+            // sync_fighter_views moves it to wherever the simulation has them
+            Transform::from_xyz(side.spawn_x(), PLAYER_SPAWN_Y, 1.0),
+            FighterView(side),
+            controls_for(side),
+            PlayerAnim::new(),
+        ));
     }
 }
 
-fn spawn_player(commands: &mut Commands, sheets: &PlayerSheets, side: PlayerSide) {
-    let (image, atlas) = PlayerAnim::starting_sheet(sheets);
-
-    commands.spawn((
-        Sprite {
-            image,
-            texture_atlas: Some(atlas),
-            custom_size: Some(Vec2::new(PLAYER_SPRITE_W, PLAYER_SPRITE_H)),
-            ..default()
-        },
-        Anchor::CENTER,
-        Transform {
-            translation: Vec3::new(side.spawn_x(), PLAYER_SPAWN_Y, 1.0),
-            ..default()
-        },
-        GlobalTransform::default(),
-        Player {
-            speed: PLAYER_SPEED,
-            jump_force: JUMP_FORCE,
-            is_grounded: false,
-            is_crouching: false,
-            prev_crouching: false,
-            velocity: Vec2::ZERO,
-            facing: side.advance_dir(),
-            has_weapon: true,
-            width: PLAYER_WIDTH,
-            height: PLAYER_HEIGHT,
-            crouch_height: CROUCH_HEIGHT,
-            health: 2,
-            max_health: 2,
-            attack_cooldown: Timer::from_seconds(0.0, TimerMode::Once),
-            hitstun: Timer::from_seconds(0.0, TimerMode::Once),
-            current_attack: None,
-            is_blocking: false,
-            block_cooldown: Timer::from_seconds(BLOCK_COOLDOWN, TimerMode::Once),
-            air_time: 0.0,
-            is_dropping: false,
-            landing_lag: Timer::from_seconds(0.0, TimerMode::Once),
-            damage_out: 0,
-        },
-        side,
-        side.controls(),
-        PlayerAnim::new(),
-    ));
-}
-
-fn player_movement(
-    keyboard: Res<ButtonInput<KeyCode>>,
-    time: Res<Time>,
-    mut query: Query<(&mut Player, &mut Transform, &Controls), (Without<Dead>, Without<NetworkControlled>)>,
+// Puts each sprite where the simulation has its fighter, smoothed between
+// ticks, and hides fighters who are down.
+fn sync_fighter_views(
+    game: Res<Match>,
+    fixed: Res<Time<Fixed>>,
+    mut views: Query<(&FighterView, &mut Transform, &mut Visibility)>,
 ) {
-    for (mut player, mut transform, controls) in &mut query {
-        player.attack_cooldown.tick(time.delta());
-        player.hitstun.tick(time.delta());
-        player.landing_lag.tick(time.delta());
+    let alpha = fixed.overstep_fraction();
 
-        // landing lag from a drop locks the fighter the same way hitstun does
-        let in_hitstun = player.is_stunned();
-        let in_attack = player.current_attack.is_some();
-        let in_block = player.is_blocking;
+    for (view, mut transform, mut visibility) in &mut views {
+        let drawn = game.drawn_position(view.0, alpha);
+        transform.translation.x = drawn.x;
+        transform.translation.y = drawn.y;
 
-        let now_crouching = keyboard.pressed(controls.crouch) && !in_hitstun && !in_attack;
-        //let now_crouching = keyboard.pressed(controls.crouch);
-
-        if player.is_grounded {
-            
-            let half_delta = (player.height - player.crouch_height) / 2.0;
-            if player.prev_crouching && !now_crouching {
-                transform.translation.y += half_delta;
-            } else if !player.prev_crouching && now_crouching {
-                transform.translation.y -= half_delta;
-            }
-
-            player.prev_crouching = now_crouching;
-            player.is_crouching = now_crouching;
-        }
-        // player.prev_crouching = now_crouching;
-        // player.is_crouching = now_crouching;
-
-        let mut move_dir = 0.0;
-        if !in_hitstun && !in_block{
-            if keyboard.pressed(controls.left) {
-                move_dir -= 1.0;
-            }
-            if keyboard.pressed(controls.right) {
-                move_dir += 1.0;
-            }
-        }
-
-        if move_dir != 0.0 {
-            player.facing = move_dir;
-        }
-
-        let speed_mult = match player.current_attack {
-            Some(AttackType::Crouching) => 0.4,
-            _ => 1.0,
-        };
-        let crouch_mult = if player.is_crouching { 0.5 } else { 1.0 };
-        let hitstun_mult = if in_hitstun { 0.0 } else { 1.0 };
-        // a drop keeps the horizontal speed it started with until it lands,
-        // so input doesn't steer it
-        if !player.is_dropping {
-            player.velocity.x = move_dir * player.speed * speed_mult * crouch_mult * hitstun_mult;
-        }
-
-        if keyboard.just_pressed(controls.jump)
-            && player.is_grounded
-            && !player.is_crouching
-            && !in_hitstun
-            && !in_attack
-        {
-            player.velocity.y = player.jump_force;
-            player.is_grounded = false;
-        }
-    }
-}
-
-fn apply_gravity(time: Res<Time>, mut query: Query<&mut Player, (Without<Dead>, Without<NetworkControlled>)>) {
-    for mut player in &mut query {
-        if !player.is_grounded {
-            player.air_time += time.delta().as_secs_f32();
-
-            if player.is_dropping {
-                // a drop attack pulls straight down instead of arcing
-                player.velocity.y = DROP_SPEED;
-            } else {
-                player.velocity.y -= GRAVITY * time.delta().as_secs_f32();
-                // 终端速度限制
-                player.velocity.y = player.velocity.y.max(TERMINAL_VELOCITY);
-            }
+        *visibility = if game.state.fighter(view.0).is_dead() {
+            Visibility::Hidden
         } else {
-            player.air_time = 0.0;
-        }
-    }
-}
-
-pub fn move_and_collide(
-    time: Res<Time>,
-    mut player_query: Query<(&mut Player, &mut Transform, &PlayerSide), (Without<Dead>, Without<NetworkControlled>)>,
-    platform_query: Query<(&Platform, &Transform), Without<Player>>,
-) {
-    let delta = time.delta().as_secs_f32();
-
-    for (mut player, mut transform, side) in &mut player_query {
-        let player_h = if player.is_crouching {
-            player.crouch_height
-        } else {
-            player.height
+            Visibility::Inherited
         };
-        let half_w = player.width / 2.0;
-        let half_h = player_h / 2.0;
-
-        let mut new_x = transform.translation.x + player.velocity.x * delta;
-
-        new_x = new_x.clamp(-LEVEL_LEN / 2.0 + half_w, LEVEL_LEN / 2.0 - half_w);
-
-        for (platform, p_transform) in &platform_query {
-            let px = p_transform.translation.x;
-            let py = p_transform.translation.y;
-            let pw = platform.width / 2.0;
-            let ph = platform.height / 2.0;
-
-            let overlaps_x = (new_x - half_w) <= (px + pw) && (new_x + half_w) >= (px - pw);
-            let overlaps_y = (transform.translation.y - half_h) < (py + ph)
-                && (transform.translation.y + half_h) > (py - ph);
-
-            if overlaps_x && overlaps_y {
-                if transform.translation.x < px {
-                    new_x = px - pw - half_w; // 从左侧撞，推到平台左边
-                } else {
-                    new_x = px + pw + half_w; // 从右侧撞，推到平台右边
-                }
-                player.velocity.x = 0.0;
-            }
-        }
-        transform.translation.x = new_x;
-
-        let mut new_y = transform.translation.y + player.velocity.y * delta;
-        player.is_grounded = false;
-
-        for (platform, p_transform) in &platform_query {
-            let px = p_transform.translation.x;
-            let py = p_transform.translation.y;
-            let pw = platform.width / 2.0;
-            let ph = platform.height / 2.0;
-
-            let overlaps_x = (transform.translation.x - half_w) <= (px + pw)
-                && (transform.translation.x + half_w) >= (px - pw);
-            let overlaps_y = (new_y - half_h) <= (py + ph) && (new_y + half_h) >= (py - ph);
-
-            if overlaps_x && overlaps_y {
-                if player.velocity.y <= 0.0 && transform.translation.y >= py {
-                    new_y = py + ph + half_h;
-                    player.velocity.y = 0.0;
-                    player.is_grounded = true;
-                } else if player.velocity.y > 0.0 && transform.translation.y < py {
-                    new_y = py - ph - half_h;
-                    player.velocity.y = 0.0;
-                }
-            }
-        }
-
-        // Respawn Logic — each fighter returns to their own side
-        if new_y < -WIN_H / 2.0 - 100.0 {
-            new_y = PLAYER_SPAWN_Y;
-            transform.translation.x = side.spawn_x();
-            player.velocity = Vec2::ZERO;
-        }
-        transform.translation.y = new_y;
-    }
-}
-
-// Draws the player collision box. Toggled with F1 — see ShowHitboxes in
-// weapon.rs. Mirrors the math in move_and_collide, so what you see is what
-// actually collides.
-fn draw_player_hitboxes(
-    show: Res<ShowHitboxes>,
-    mut gizmos: Gizmos,
-    players: Query<(&Player, &Transform), Without<Dead>>,
-) {
-    if !show.0 {
-        return;
-    }
-
-    for (player, transform) in &players {
-        let height = if player.is_crouching {
-            player.crouch_height
-        } else {
-            player.height
-        };
-
-        gizmos.rect_2d(
-            transform.translation.truncate(),
-            Vec2::new(player.width, height),
-            Color::srgb(0.2, 0.8, 1.0),
-        );
     }
 }
 
@@ -431,10 +178,10 @@ fn draw_player_hitboxes(
 const SPRITE_ANCHOR_Y: f32 = 0.0;
 
 // keeps sprite animation in line when crouching
-fn align_player_sprite(mut players: Query<(&Player, &mut Anchor)>) {
-    for (player, mut anchor) in &mut players {
-        let crouch_shift = if player.is_crouching {
-            (player.height - player.crouch_height) / 2.0
+fn align_player_sprite(game: Res<Match>, mut players: Query<(&FighterView, &mut Anchor)>) {
+    for (view, mut anchor) in &mut players {
+        let crouch_shift = if game.state.fighter(view.0).crouching {
+            (PLAYER_HEIGHT - CROUCH_HEIGHT) / 2.0
         } else {
             0.0
         };
@@ -442,5 +189,26 @@ fn align_player_sprite(mut players: Query<(&Player, &mut Anchor)>) {
             0.0,
             SPRITE_ANCHOR_Y - crouch_shift / PLAYER_SPRITE_H,
         ));
+    }
+}
+
+// Draws the collision box the simulation uses. Toggled with F1 — see
+// ShowHitboxes in weapon.rs. Drawn at the exact simulated position rather
+// than the smoothed one, so what you see is what actually collides.
+fn draw_player_hitboxes(show: Res<ShowHitboxes>, game: Res<Match>, mut gizmos: Gizmos) {
+    if !show.0 {
+        return;
+    }
+
+    for fighter in &game.state.fighters {
+        if fighter.is_dead() {
+            continue;
+        }
+        let body = fighter.body();
+        gizmos.rect_2d(
+            Vec2::new(body.x, body.y),
+            Vec2::new(body.width, body.height),
+            Color::srgb(0.2, 0.8, 1.0),
+        );
     }
 }

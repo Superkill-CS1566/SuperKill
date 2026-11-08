@@ -1,13 +1,13 @@
 use bevy::prelude::*;
 use bevy::transform::TransformSystems;
 
-use crate::combat::Dead;
 use crate::common::AppState;
-use crate::game::GameState;
+use crate::game::{GameState, Match};
 use crate::loading::despawn_with;
-use crate::player::Player;
+use crate::player::FighterView;
 #[cfg(debug_assertions)]
 use crate::player::PlayerSide;
+use crate::sim::fighter::MAX_HEALTH;
 
 pub struct HealthVisualsPlugin;
 
@@ -19,6 +19,7 @@ impl Plugin for HealthVisualsPlugin {
                 .chain()
                 .run_if(in_state(AppState::InGame))
                 .run_if(in_state(GameState::Playing))
+                .run_if(resource_exists::<Match>)
                 .before(TransformSystems::Propagate),
         )
         .add_systems(OnExit(AppState::InGame), despawn_with::<HealthBar>);
@@ -28,7 +29,8 @@ impl Plugin for HealthVisualsPlugin {
             Update,
             preview_low_health
                 .run_if(in_state(AppState::InGame))
-                .run_if(in_state(GameState::Playing)),
+                .run_if(in_state(GameState::Playing))
+                .run_if(resource_exists::<Match>),
         );
     }
 }
@@ -61,7 +63,7 @@ fn warning_color(seconds: f32) -> Color {
     Color::srgb(1.0, 0.55 + 0.2 * pulse, 0.55 + 0.2 * pulse)
 }
 
-fn spawn_health_bars(mut commands: Commands, players: Query<Entity, Added<Player>>) {
+fn spawn_health_bars(mut commands: Commands, players: Query<Entity, Added<FighterView>>) {
     for owner in &players {
         for fill in [false, true] {
             commands.spawn((
@@ -86,7 +88,8 @@ fn spawn_health_bars(mut commands: Commands, players: Query<Entity, Added<Player
 
 fn update_health_bars(
     mut commands: Commands,
-    players: Query<(&Player, &Transform, Has<Dead>)>,
+    game: Res<Match>,
+    owners: Query<(&FighterView, &Transform)>,
     mut bars: Query<
         (
             Entity,
@@ -95,31 +98,28 @@ fn update_health_bars(
             &mut Transform,
             &mut Visibility,
         ),
-        Without<Player>,
+        Without<FighterView>,
     >,
 ) {
     for (entity, bar, mut sprite, mut transform, mut visibility) in &mut bars {
-        let Ok((player, owner_transform, dead)) = players.get(bar.owner) else {
+        let Ok((view, owner_transform)) = owners.get(bar.owner) else {
             commands.entity(entity).despawn();
             continue;
         };
-        *visibility = if dead || player.health == 0 {
+        let fighter = game.state.fighter(view.0);
+
+        *visibility = if fighter.is_dead() || fighter.health == 0 {
             Visibility::Hidden
         } else {
             Visibility::Inherited
         };
-        let height = if player.is_crouching {
-            player.crouch_height
-        } else {
-            player.height
-        };
         let mut position = owner_transform.translation;
-        position.y += height / 2.0 + BAR_OFFSET;
+        position.y += fighter.height() / 2.0 + BAR_OFFSET;
         position.z += if bar.fill { 3.0 } else { 2.0 };
         if bar.fill {
-            let width = BAR_WIDTH * health_ratio(player.health, player.max_health);
+            let width = BAR_WIDTH * health_ratio(fighter.health, MAX_HEALTH);
             sprite.custom_size = Some(Vec2::new(width, BAR_HEIGHT));
-            sprite.color = if is_low_health(player.health, player.max_health) {
+            sprite.color = if is_low_health(fighter.health, MAX_HEALTH) {
                 LOW_COLOR
             } else {
                 HEALTHY_COLOR
@@ -130,9 +130,14 @@ fn update_health_bars(
     }
 }
 
-fn tint_low_health(time: Res<Time>, mut players: Query<(&Player, &mut Sprite, Has<Dead>)>) {
-    for (player, mut sprite, dead) in &mut players {
-        sprite.color = if !dead && is_low_health(player.health, player.max_health) {
+fn tint_low_health(
+    time: Res<Time>,
+    game: Res<Match>,
+    mut players: Query<(&FighterView, &mut Sprite)>,
+) {
+    for (view, mut sprite) in &mut players {
+        let fighter = game.state.fighter(view.0);
+        sprite.color = if !fighter.is_dead() && is_low_health(fighter.health, MAX_HEALTH) {
             warning_color(time.elapsed_secs())
         } else {
             Color::WHITE
@@ -140,57 +145,37 @@ fn tint_low_health(time: Res<Time>, mut players: Query<(&Player, &mut Sprite, Ha
     }
 }
 
+// Debug: 3 and 4 flip each fighter between full and low health.
 #[cfg(debug_assertions)]
-fn preview_low_health(
-    keyboard: Res<ButtonInput<KeyCode>>,
-    mut players: Query<(&mut Player, &PlayerSide), Without<Dead>>,
-) {
-    for (mut player, side) in &mut players {
+fn preview_low_health(keyboard: Res<ButtonInput<KeyCode>>, mut game: ResMut<Match>) {
+    for side in [PlayerSide::Left, PlayerSide::Right] {
         let key = match side {
             PlayerSide::Left => KeyCode::Digit3,
             PlayerSide::Right => KeyCode::Digit4,
         };
-        if keyboard.just_pressed(key) {
-            if player.max_health < 2 {
-                continue;
-            }
-            player.health = if is_low_health(player.health, player.max_health) {
-                player.max_health
-            } else {
-                player.max_health / 2
-            };
+        if !keyboard.just_pressed(key) {
+            continue;
         }
+
+        let fighter = &mut game.state.fighters[side.index()];
+        if fighter.is_dead() {
+            continue;
+        }
+        fighter.health = if is_low_health(fighter.health, MAX_HEALTH) {
+            MAX_HEALTH
+        } else {
+            MAX_HEALTH / 2
+        };
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sim::{Death, FighterState, PlayerSide, Terrain};
 
-    fn test_player() -> Player {
-        Player {
-            speed: 320.0,
-            jump_force: 620.0,
-            is_grounded: true,
-            is_crouching: false,
-            prev_crouching: false,
-            velocity: Vec2::ZERO,
-            facing: 1.0,
-            width: 30.0,
-            height: 95.0,
-            crouch_height: 35.0,
-            health: 2,
-            max_health: 2,
-            attack_cooldown: Timer::default(),
-            hitstun: Timer::default(),
-            current_attack: None,
-            has_weapon: true,
-            is_blocking: false,
-            block_cooldown: Timer::default(),
-            air_time: 0.0,
-            is_dropping: false,
-            landing_lag: Timer::default(),
-        }
+    fn left_fighter(app: &mut App) -> &mut FighterState {
+        &mut app.world_mut().resource_mut::<Match>().into_inner().state.fighters[0]
     }
 
     #[test]
@@ -210,13 +195,19 @@ mod tests {
     #[test]
     fn bars_and_tint_update_after_damage_death_and_respawn() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins).add_systems(
-            PostUpdate,
-            (spawn_health_bars, update_health_bars, tint_low_health).chain(),
-        );
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(Match::new(Terrain::flat()))
+            .add_systems(
+                PostUpdate,
+                (spawn_health_bars, update_health_bars, tint_low_health).chain(),
+            );
         let owner = app
             .world_mut()
-            .spawn((test_player(), Sprite::default(), Transform::default()))
+            .spawn((
+                FighterView(PlayerSide::Left),
+                Sprite::default(),
+                Transform::default(),
+            ))
             .id();
         app.update();
         assert_eq!(
@@ -227,7 +218,7 @@ mod tests {
             2
         );
 
-        app.world_mut().get_mut::<Player>(owner).unwrap().health = 1;
+        left_fighter(&mut app).health = 1;
         app.update();
         assert_ne!(
             app.world().get::<Sprite>(owner).unwrap().color,
@@ -245,7 +236,10 @@ mod tests {
             }
         }
 
-        app.world_mut().entity_mut(owner).insert(Dead::new(0.0));
+        left_fighter(&mut app).death = Some(Death {
+            killer_x: 0.0,
+            ticks_down: 0,
+        });
         app.update();
         let world = app.world_mut();
         for visibility in world
@@ -254,8 +248,10 @@ mod tests {
         {
             assert_eq!(*visibility, Visibility::Hidden);
         }
-        app.world_mut().entity_mut(owner).remove::<Dead>();
-        app.world_mut().get_mut::<Player>(owner).unwrap().health = 2;
+
+        let fighter = left_fighter(&mut app);
+        fighter.death = None;
+        fighter.health = MAX_HEALTH;
         app.update();
         assert_eq!(
             app.world().get::<Sprite>(owner).unwrap().color,

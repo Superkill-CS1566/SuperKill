@@ -1,14 +1,17 @@
 use bevy::prelude::*;
 use bevy::camera::visibility::RenderLayers;
 
-use crate::combat::{Dead, Priority};
-use crate::common::{AppState, BACKGROUND_LAYER, GROUND_THICKNESS, GROUND_Y, LEVEL_LEN, Platform};
+use std::time::Instant;
+use crate::common::{AppState, BACKGROUND_LAYER};
 use crate::level_select::{LevelType, SelectedLevel};
 use crate::loading::{LoadingAssets, despawn_with};
-use crate::perlin_noise::sample_chunk;
-use crate::player::{Player, PlayerSide, move_and_collide};
-use crate::recursive_generation::{MazeGrid, Tile, rd_generate_maze};
-use crate::weapon::{GroundWeapon, ThrownSword};
+use crate::network::OnlineSession;
+use crate::player::PendingInputs;
+use crate::protocol::ONLINE_LEVEL;
+use crate::sim::{
+    MatchState, PlayerSide, SCREEN_COUNT, START_SCREEN, TICK_SECONDS, Terrain, TerrainKind,
+    ThrownSword, DEFAULT_SEED,
+};
 
 pub struct GamePlugin;
 
@@ -16,15 +19,24 @@ impl Plugin for GamePlugin {
     fn build(&self, app: &mut App) {
         app.init_state::<GameState>()
             .insert_resource(Winner(None))
+            // the fixed clock ticks at exactly the simulation's rate
+            .insert_resource(Time::<Fixed>::from_seconds(TICK_SECONDS as f64))
             .add_systems(Startup, load_level)
             .add_systems(OnEnter(AppState::InGame), (setup_game, setup_level))
+            // online, the server runs the match instead — see network.rs
+            .add_systems(
+                FixedUpdate,
+                step_match
+                    .run_if(in_state(AppState::InGame))
+                    .run_if(resource_exists::<Match>)
+                    .run_if(not(resource_exists::<OnlineSession>)),
+            )
             .add_systems(
                 Update,
                 (
-                    screen_transition
+                    (update_background, check_winner)
                         .run_if(in_state(AppState::InGame))
-                        .run_if(in_state(GameState::Playing))
-                        .after(move_and_collide),
+                        .run_if(resource_exists::<Match>),
                     toggle_pause.run_if(in_state(AppState::InGame)),
                     pause_menu_interaction
                         .run_if(in_state(AppState::InGame))
@@ -32,8 +44,14 @@ impl Plugin for GamePlugin {
                 ),
             )
             .add_systems(
+                Update,
+                time_presses
+                    .run_if(in_state(AppState::InGame))
+                    .run_if(resource_exists::<Match>)
+            )
+            .add_systems(
                 OnExit(AppState::InGame),
-                (despawn_game, despawn_with::<Background>),
+                (despawn_game, despawn_with::<Background>, remove_match),
             );
     }
 }
@@ -54,40 +72,126 @@ enum PauseButton {
     Quit,
 }
 
+/// The background image, and which screen it's currently showing.
 #[derive(Component)]
-pub struct Background;
+pub struct Background {
+    screen: usize,
+}
 
 #[derive(Resource)]
 pub struct Backgrounds(Vec<Handle<Image>>);
 
 #[derive(Resource)]
-pub struct CurrentScreen(usize);
-
-#[derive(Resource)]
 pub struct Winner(pub Option<PlayerSide>);
 
-#[derive(Resource)]
-struct Seed(u64);
+/// Marks the sprites that draw the terrain.
+#[derive(Component)]
+struct TerrainSprite;
 
-// replaced world height/width withh WIN_H and WIN_W in common
-// GRAVITY and the player constants now live in player.rs
-// ZOOM / SCREEN_W and the camera systems now live in camera.rs
-// GROUND_Y / GROUND_THICKNESS / Platform now live in common.rs
+// ---------------------------------------------------------------- the match
+
+/// The match being played.
+///
+/// `previous` is the state one tick earlier. The simulation only moves 60
+/// times a second, but the screen may refresh faster, so sprites are drawn
+/// partway between the two to keep movement smooth at any frame rate.
+#[derive(Resource)]
+pub struct Match {
+    pub state: MatchState,
+    pub previous: MatchState,
+    pub terrain: Terrain,
+}
+
+/// A move bigger than this between two ticks is a teleport — a respawn or a
+/// screen change — and is drawn as a jump instead of sliding across the screen.
+const SNAP_DISTANCE: f32 = 100.0;
+
+impl Match {
+    pub fn new(terrain: Terrain) -> Self {
+        let state = MatchState::new();
+        Self {
+            previous: state.clone(),
+            state,
+            terrain,
+        }
+    }
+
+    /// Where to draw a fighter this frame: `alpha` of the way from the
+    /// previous tick's position to the current one.
+    pub fn drawn_position(&self, side: PlayerSide, alpha: f32) -> Vec2 {
+        let before = self.previous.fighter(side);
+        let now = self.state.fighter(side);
+        blend(Vec2::new(before.x, before.y), Vec2::new(now.x, now.y), alpha)
+    }
+
+    /// The same for a thrown sword. One thrown this tick is drawn where it is.
+    pub fn drawn_sword_position(&self, sword: &ThrownSword, alpha: f32) -> Vec2 {
+        let now = Vec2::new(sword.x, sword.y);
+        match self.previous.swords.iter().find(|s| s.id == sword.id) {
+            Some(before) => blend(Vec2::new(before.x, before.y), now, alpha),
+            None => now,
+        }
+    }
+}
+
+fn blend(before: Vec2, now: Vec2, alpha: f32) -> Vec2 {
+    if before.distance(now) > SNAP_DISTANCE {
+        now
+    } else {
+        before.lerp(now, alpha)
+    }
+}
+
+// One simulation tick. This runs on the fixed clock, so the match advances at
+// exactly the simulation's rate whatever the frame rate is.
+fn step_match(
+    mut game: ResMut<Match>,
+    mut pending: ResMut<PendingInputs>,
+    game_state: Res<State<GameState>>,
+) {
+    let Match {
+        state,
+        previous,
+        terrain,
+    } = &mut *game;
+    *previous = state.clone();
+
+    // paused: leave the match alone. previous now equals it, so the fighters
+    // hold still instead of hovering between two ticks
+    if *game_state.get() != GameState::Playing {
+        return;
+    }
+    state.step(pending.take(), terrain);
+}
+
+// The match is won by leaving the outermost screen.
+fn check_winner(
+    game: Res<Match>,
+    mut winner: ResMut<Winner>,
+    mut next_app_state: ResMut<NextState<AppState>>,
+) {
+    if let Some(side) = game.state.winner {
+        winner.0 = Some(side);
+        next_app_state.set(AppState::GameOver);
+    }
+}
+
+fn remove_match(mut commands: Commands) {
+    commands.remove_resource::<Match>();
+}
+
+// ---------------------------------------------------------------- level
 
 // Background
 const BG_OFFSET_Y: f32 = 65.0;
-const SCREEN_INSET: f32 = 20.0;
-const START_SCREEN: usize = 1;
-const MAZE_WIDTH: usize = 39;
-const MAZE_HEIGHT: usize = 21;
-
-const MAZE_TILE_SIZE: f32 = 50.0;
 
 const BG_PATHS: &[&str] = &[
     "backgrounds/street.png",
     "backgrounds/hills.png", // start screen
     "white_grid_inverted.png",
 ];
+// one background per screen — this fails to compile if the two drift apart
+const _: () = assert!(BG_PATHS.len() == SCREEN_COUNT);
 
 // add stuff for loading in foreground later for now just background
 // might put it in separate file since its more a part of procedural gen
@@ -103,96 +207,77 @@ fn load_level(
         handles.push(handle);
     }
     commands.insert_resource(Backgrounds(handles));
-    commands.insert_resource(Seed(1));
 }
 
-fn setup_level(
-    mut commands: Commands,
-    backgrounds: Res<Backgrounds>,
-    selected_level: Res<SelectedLevel>,
-) {
-    let screen = match selected_level.0 {
-        LevelType::Flat => 0,
-        LevelType::Noise => 1,
-        LevelType::Maze => 2,
-    };
-
-    commands.insert_resource(CurrentScreen(screen));
-
+fn setup_level(mut commands: Commands, backgrounds: Res<Backgrounds>) {
     commands.spawn((
         Sprite {
-            image: backgrounds.0[screen].clone(),
+            image: backgrounds.0[START_SCREEN].clone(),
             ..default()
         },
         Transform::from_xyz(0., BG_OFFSET_Y, -1.),
         RenderLayers::layer(BACKGROUND_LAYER),
-        Background,
+        Background {
+            screen: START_SCREEN,
+        },
     ));
 }
 
-// only the fighter holding priority may cross, and only toward their own goal
-pub fn screen_transition(
-    mut commands: Commands,
-    mut current: ResMut<CurrentScreen>,
+// swap the background when the match moves to another screen
+fn update_background(
+    game: Res<Match>,
     backgrounds: Res<Backgrounds>,
-    priority: Res<Priority>,
-    mut players: Query<(&mut Player, &mut Transform, &PlayerSide), Without<Dead>>,
-    mut bg_q: Query<&mut Sprite, With<Background>>,
-    mut winner: ResMut<Winner>,
-    mut next_app_state: ResMut<NextState<AppState>>,
-    leftovers: Query<Entity, Or<(With<GroundWeapon>, With<ThrownSword>)>>,
+    mut background: Query<(&mut Sprite, &mut Background)>,
 ) {
-    // neutral — nobody advances
-    let Some(holder) = priority.0 else {
-        return;
-    };
-
-    let dir = holder.advance_dir();
-    // edge of the background image, not the edge of the view
-    let edge = LEVEL_LEN / 2.0;
-
-    let at_edge = players
-        .iter()
-        .any(|(p, t, s)| *s == holder && t.translation.x * dir >= edge - p.width / 2.0 - 1.0);
-    if !at_edge {
-        return;
-    }
-
-    let next = if dir > 0.0 {
-        if current.0 + 1 >= backgrounds.0.len() {
-            winner.0 = Some(holder);
-            next_app_state.set(AppState::GameOver);
-            return;
-            // outermost screen to the right - P1 wins
+    let screen = game.state.current_screen;
+    for (mut sprite, mut shown) in &mut background {
+        if shown.screen == screen {
+            continue;
         }
-        current.0 + 1
-    } else {
-        if current.0 == 0 {
-            winner.0 = Some(holder);
-            next_app_state.set(AppState::GameOver);
-            return;
-            // outermost screen to the left - P2 wins
-        }
-        current.0 - 1
-    };
-    current.0 = next;
-
-    // despawn weapons left behind in old screen
-    for entity in &leftovers {
-        commands.entity(entity).despawn();
-    }
-
-    // leader enters from behind; the other fighter appears ahead of them
-    for (mut player, mut transform, side) in &mut players {
-        let sign = if *side == holder { -1.0 } else { 1.0 };
-        transform.translation.x = sign * (edge - SCREEN_INSET) * dir;
-        player.velocity.x = 0.0;
-    }
-
-    if let Ok(mut sprite) = bg_q.single_mut() {
-        sprite.image = backgrounds.0[current.0].clone();
+        shown.screen = screen;
+        sprite.image = backgrounds.0[screen].clone();
     }
 }
+
+fn setup_game(
+    mut commands: Commands,
+    selected_level: Res<SelectedLevel>,
+    online: Option<Res<OnlineSession>>,
+    mut winner: ResMut<Winner>,
+    mut next_game_state: ResMut<NextState<GameState>>,
+) {
+    next_game_state.set(GameState::Playing);
+    winner.0 = None;
+
+    // online, everyone must collide with the same ground the server does
+    let kind = if online.is_some() {
+        ONLINE_LEVEL
+    } else {
+        match selected_level.0 {
+            LevelType::Flat => TerrainKind::Flat,
+            LevelType::Noise => TerrainKind::Noise,
+            LevelType::Maze => TerrainKind::Maze,
+        }
+    };
+    let terrain = Terrain::generate(kind, DEFAULT_SEED);
+
+    // draw exactly the blocks the simulation collides with
+    for block in &terrain.blocks {
+        commands.spawn((
+            Sprite {
+                color: Color::srgb(0.25, 0.25, 0.3),
+                custom_size: Some(Vec2::new(block.width, block.height)),
+                ..default()
+            },
+            Transform::from_xyz(block.x, block.y, 0.0),
+            TerrainSprite,
+        ));
+    }
+
+    commands.insert_resource(Match::new(terrain));
+}
+
+// ---------------------------------------------------------------- pause
 
 fn despawn_tree(commands: &mut Commands, entity: Entity, children: &Query<&Children>) {
     if let Ok(kids) = children.get(entity) {
@@ -201,163 +286,6 @@ fn despawn_tree(commands: &mut Commands, entity: Entity, children: &Query<&Child
         }
     }
     commands.entity(entity).despawn();
-}
-
-fn setup_game(
-    mut commands: Commands,
-    seed: Res<Seed>,
-    selected_level: Res<SelectedLevel>,
-    mut next_game_state: ResMut<NextState<GameState>>,
-) {
-    next_game_state.set(GameState::Playing);
-
-    match selected_level.0 {
-        LevelType::Flat => {
-            spawn_platform(
-                &mut commands,
-                0.0,
-                GROUND_Y,
-                LEVEL_LEN,
-                GROUND_THICKNESS,
-                Color::srgb(0.25, 0.25, 0.3),
-            );
-        }
-
-        LevelType::Noise => {
-            spawn_noise_terrain(&mut commands, seed.0, -LEVEL_LEN / 2.0, GROUND_THICKNESS);
-        }
-
-        LevelType::Maze => {
-            spawn_maze(&mut commands, 1, 1);
-        }
-    }
-}
-
-fn spawn_platform(commands: &mut Commands, x: f32, y: f32, width: f32, height: f32, color: Color) {
-    commands.spawn((
-        Sprite {
-            color,
-            custom_size: Some(Vec2::new(width, height)),
-            ..default()
-        },
-        Transform {
-            translation: Vec3::new(x, y, 0.0),
-            ..default()
-        },
-        GlobalTransform::default(),
-        Platform { width, height },
-    ));
-}
-
-fn spawn_noise_terrain(
-    commands: &mut Commands,
-    seed: u64,
-    start_x: f32,
-    amplitude: f32,
-) {
-
-    let block_width = 40.0;
-
-    let chunk = sample_chunk(0, (LEVEL_LEN / block_width) as u32, seed);
-
-    let bottom_y = -400.0;
-
-    for (i, noise_value) in chunk.iter().enumerate() {
-        let surface_y = GROUND_Y + (noise_value * amplitude) + amplitude;
-
-        let height = surface_y - bottom_y;
-        let center_y = bottom_y + height / 2.0;
-
-        spawn_platform(
-            commands,
-            start_x + i as f32 * block_width,
-            center_y,
-            block_width,
-            height,
-            Color::srgb(0.25, 0.25, 0.3),
-        );
-    }
-}
-
-fn spawn_maze(commands: &mut Commands, seed: u64, level: u32) {
-    let grid = rd_generate_maze(MAZE_WIDTH, MAZE_HEIGHT, seed, level);
-
-    let tile_size = MAZE_TILE_SIZE;
-
-    let start_x = -(grid.width() as f32 * tile_size) / 2.0;
-    let start_y = (grid.height() as f32 * tile_size) / 2.0;
-
-    let rectangles = merge_wall_tiles(&grid);
-
-    for (x, y, width, height) in rectangles {
-        let world_x = start_x + (x as f32 * tile_size) + (width as f32 * tile_size) / 2.0;
-
-        let world_y = start_y - (y as f32 * tile_size) - (height as f32 * tile_size) / 2.0;
-
-        spawn_platform(
-            commands,
-            world_x,
-            world_y,
-            width as f32 * tile_size,
-            height as f32 * tile_size,
-            Color::srgb(0.25, 0.25, 0.3),
-        );
-    }
-}
-
-fn merge_wall_tiles(grid: &MazeGrid) -> Vec<(usize, usize, usize, usize)> {
-    let width = grid.width();
-    let height = grid.height();
-
-    let mut visited = vec![vec![false; width]; height];
-
-    // Each tuple represents (x, y, width, height) in tiles
-    let mut rectangles = Vec::new();
-
-    for y in 0..height {
-        for x in 0..width {
-            if visited[y][x] || grid.tile(x, y) != Tile::Wall {
-                continue;
-            }
-
-            // Find the maximum horizontal stretch
-            let mut rect_width = 0;
-
-            while x + rect_width < width
-                && !visited[y][x + rect_width]
-                && grid.tile(x + rect_width, y) == Tile::Wall
-            {
-                rect_width += 1;
-            }
-
-            // Find the maximum vertical stretch
-            let mut rect_height = 1;
-
-            'outer: while y + rect_height < height {
-                for dx in 0..rect_width {
-                    let next_y = y + rect_height;
-                    let next_x = x + dx;
-
-                    if visited[next_y][next_x] || grid.tile(next_x, next_y) != Tile::Wall {
-                        break 'outer;
-                    }
-                }
-
-                rect_height += 1;
-            }
-
-            // Mark all tiles in this rectangle as visited
-            for dy in 0..rect_height {
-                for dx in 0..rect_width {
-                    visited[y + dy][x + dx] = true;
-                }
-            }
-
-            rectangles.push((x, y, rect_width, rect_height));
-        }
-    }
-
-    rectangles
 }
 
 fn toggle_pause(
@@ -491,10 +419,39 @@ fn pause_menu_interaction(
 
 fn despawn_game(
     mut commands: Commands,
-    query: Query<Entity, Or<(With<Platform>, With<PauseMenuRoot>)>>,
+    query: Query<Entity, Or<(With<TerrainSprite>, With<PauseMenuRoot>)>>,
     children: Query<&Children>,
 ) {
     for entity in &query {
         despawn_tree(&mut commands, entity, &children);
+    }
+}
+
+// Debug: run with --latency-test, only checks for D inputs, letting the
+// fighter stop in between. Prints each press-to-screen time.
+fn time_presses(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    game: Res<Match>,
+    mut started: Local<Option<Instant>>,
+    mut total: Local<f64>,
+    mut count: Local<u32>,
+) {
+    let was_still = game.previous.fighters.iter().all(|f| f.vx == 0.0);
+    let moving = game.state.fighters.iter().any(|f| f.vx != 0.0);
+
+    // start: D pressed while everyone was standing still
+    if keyboard.just_pressed(KeyCode::KeyD) && was_still && started.is_none() {
+        *started = Some(Instant::now());
+    }
+
+    // stop: the first frame a fighter is shown moving
+    if let Some(start) = *started {
+        if moving {
+            let ms = start.elapsed().as_secs_f64() * 1000.0;
+            *total += ms;
+            *count += 1;
+            println!("press {}: {ms:.1} ms (average {:.1} ms)", *count, *total / *count as f64);
+            *started = None;
+        }
     }
 }

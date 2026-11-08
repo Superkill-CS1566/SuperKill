@@ -1,18 +1,17 @@
 use bevy::prelude::*;
 
-use crate::combat::{Dead, Priority};
 use crate::common::{
     AppState, LEVEL_LEN, BackgroundCamera, UiCamera, WIN_W, despawn_background_camera, despawn_ui_camera,
     spawn_background_camera, spawn_ui_camera,
 };
-use crate::game::{GameState, screen_transition};
-use crate::player::{Player, PlayerSide};
+use crate::game::{GameState, Match};
+use crate::sim::ARENA_WIDTH;
 
 pub struct CameraPlugin;
 
 impl Plugin for CameraPlugin {
     fn build(&self, app: &mut App) {
-        
+
         app.init_resource::<CameraFollowState>();
 
         app.add_systems(
@@ -21,16 +20,11 @@ impl Plugin for CameraPlugin {
         )
         .add_systems(
             Update,
-            camera_follow
+            (camera_follow, background_camera_follow)
+                .chain()
                 .run_if(in_state(AppState::InGame))
                 .run_if(in_state(GameState::Playing))
-                .after(screen_transition),
-        )
-        .add_systems(
-            Update,
-            background_camera_follow
-                .run_if(in_state(AppState::InGame))
-                .run_if(in_state(GameState::Playing)),
+                .run_if(resource_exists::<Match>),
         )
         .add_systems(
             OnExit(AppState::InGame),
@@ -39,20 +33,20 @@ impl Plugin for CameraPlugin {
     }
 }
 
-pub const ZOOM: f32 = 0.6; // 0.5 = 2× zoomed in
-/// Width of the visible world at this zoom.
-pub const SCREEN_W: f32 = WIN_W * ZOOM;
+/// Width of the visible world. It's exactly the simulation's play area, so
+/// the crush edge is always the edge of the screen.
+pub const SCREEN_W: f32 = ARENA_WIDTH;
+/// Follows from the width — 0.6 at the current numbers (0.5 = 2× zoomed in).
+pub const ZOOM: f32 = SCREEN_W / WIN_W;
 
-/// How far off-center the leader sits, so the level ahead of them is visible.
-const LOOKAHEAD: f32 = 160.0;
-/// How close to the view edge the leader may be pushed in midpoint mode.
-const CAGE_MARGIN: f32 = 80.0;
 const CAMERA_Y: f32 = -120.0;
 const FOLLOW_SPEED: f32 = 9.0;
 
 #[derive(Resource, Default)]
 pub struct CameraFollowState {
     initialized: bool,
+    /// The screen the camera last followed — a change means cut, not pan.
+    screen: usize,
 }
 
 pub fn init_camera_zoom(
@@ -77,54 +71,25 @@ fn smooth_camera_x(current: f32, target: f32, delta_secs: f32, snap: bool) -> f3
     (current + (target - current) * blend).clamp(-bound, bound)
 }
 
-// three modes: locked (neutral), follow-with-lookahead (leader alone),
-// midpoint (both alive)
+// The simulation decides where the play area is — locked to the screen center
+// when neutral, ahead of a lone leader, between two live fighters. The camera
+// just eases toward it.
 pub fn camera_follow(
     time: Res<Time>,
-    priority: Res<Priority>,
-    current_screen: Res<crate::game::CurrentScreen>,
+    game: Res<Match>,
     mut follow: ResMut<CameraFollowState>,
-    players: Query<(&Transform, &PlayerSide), (With<Player>, Without<Dead>)>,
-    mut camera: Single<&mut Transform, (With<UiCamera>, Without<Player>)>,
+    mut camera: Single<&mut Transform, With<UiCamera>>,
 ) {
-    let half_view = SCREEN_W / 2.0;
-
-    let target = match priority.0 {
-        // neutral — locked to the center of the current screen
-        None => 0.0,
-
-        Some(holder) => {
-            let Some(holder_x) = players
-                .iter()
-                .find(|(_, s)| **s == holder)
-                .map(|(t, _)| t.translation.x)
-            else {
-                return; // holder is down this frame; leave the camera where it is
-            };
-
-            let other_x = players
-                .iter()
-                .find(|(_, s)| **s != holder)
-                .map(|(t, _)| t.translation.x);
-
-            match other_x {
-                // leader alone — offset them toward their back edge
-                None => holder_x + LOOKAHEAD * holder.advance_dir(),
-
-                // both alive — midpoint, but never let the leader leave frame
-                Some(other_x) => ((holder_x + other_x) / 2.0).clamp(
-                    holder_x - half_view + CAGE_MARGIN,
-                    holder_x + half_view - CAGE_MARGIN,
-                ),
-            }
-        }
-    };
+    let target = game.state.arena_center;
 
     // A screen transition teleports players; only ordinary following should ease.
-    let snap = !follow.initialized || current_screen.is_changed();
+    let screen = game.state.current_screen;
+    let snap = !follow.initialized || screen != follow.screen;
+
     camera.translation.x = smooth_camera_x(camera.translation.x, target, time.delta_secs(), snap);
     camera.translation.y = CAMERA_Y;
     follow.initialized = true;
+    follow.screen = screen;
 }
 
 const PARALLAX_FACTOR: f32 = 0.4;
