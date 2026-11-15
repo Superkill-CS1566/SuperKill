@@ -7,6 +7,7 @@ pub enum LevelType {
     Flat,
     Noise,
     Maze,
+    Autoscroll,
 }
 
 // Tracks which generation type the player selected
@@ -73,6 +74,7 @@ fn setup_level_select(mut commands: Commands) {
         spawn_level_button(parent, "Flat Terrain", LevelType::Flat);
         spawn_level_button(parent, "Noise Terrain", LevelType::Noise);
         spawn_level_button(parent, "Maze Generation", LevelType::Maze);
+        spawn_level_button(parent, "Auto-Scroller", LevelType::Autoscroll);
     });
 }
 

@@ -39,6 +39,9 @@ impl Block {
 pub enum TerrainKind {
     /// The real level: hills from Perlin noise.
     Noise,
+    /// Noise hills with the step between neighboring columns limited to
+    /// something jumpable — for the autoscroll level.
+    NoiseTraversable,
     /// Testing only — a single flat floor.
     Flat,
     /// Testing only — a recursive-division maze.
@@ -54,6 +57,11 @@ pub const DEFAULT_SEED: u64 = 1;
 const NOISE_BLOCK_WIDTH: f32 = 40.0;
 const NOISE_AMPLITUDE: f32 = GROUND_THICKNESS;
 const NOISE_BOTTOM_Y: f32 = -400.0;
+/// Tallest rise allowed between neighboring columns in traversable terrain.
+/// Placeholder: set it to roughly half the fighter's max jump height
+/// (v² / 2g from fighter.rs), since the player has to clear it while the
+/// edge is closing in.
+const TRAVERSABLE_MAX_STEP: f32 = 40.0;
 
 // maze terrain
 const MAZE_WIDTH: usize = 39;
@@ -71,6 +79,7 @@ impl Terrain {
     pub fn generate(kind: TerrainKind, seed: u64) -> Self {
         match kind {
             TerrainKind::Noise => Self::noise(seed),
+            TerrainKind::NoiseTraversable => Self::noise_traversable(seed),
             TerrainKind::Flat => Self::flat(),
             TerrainKind::Maze => Self::maze(seed, MAZE_LEVEL),
         }
@@ -91,12 +100,32 @@ impl Terrain {
     /// A row of columns whose heights follow Perlin noise — the old
     /// `spawn_noise_terrain`, producing the same blocks.
     pub fn noise(seed: u64) -> Self {
+        Self::noise_columns(seed, None)
+    }
+
+    /// The same hills, with every step between neighboring columns limited so
+    /// the level can always be crossed while the screen edge closes in.
+    pub fn noise_traversable(seed: u64) -> Self {
+        Self::noise_columns(seed, Some(TRAVERSABLE_MAX_STEP))
+    }
+
+    /// Shared column generation. With `max_step: None` this is exactly the
+    /// original noise terrain.
+    fn noise_columns(seed: u64, max_step: Option<f32>) -> Self {
         let start_x = -LEVEL_LEN / 2.0;
         let chunk = sample_chunk(0, (LEVEL_LEN / NOISE_BLOCK_WIDTH) as u32, seed);
 
         let mut blocks = Vec::new();
+        let mut prev_surface: Option<f32> = None;
         for (i, noise_value) in chunk.iter().enumerate() {
-            let surface_y = GROUND_Y + (noise_value * NOISE_AMPLITUDE) + NOISE_AMPLITUDE;
+            let mut surface_y = GROUND_Y + (noise_value * NOISE_AMPLITUDE) + NOISE_AMPLITUDE;
+
+            // move toward the noise, but never by more than one jumpable step
+            if let (Some(step), Some(prev)) = (max_step, prev_surface) {
+                surface_y = surface_y.clamp(prev - step, prev + step);
+            }
+            prev_surface = Some(surface_y);
+
             let height = surface_y - NOISE_BOTTOM_Y;
 
             blocks.push(Block {
@@ -215,4 +244,28 @@ fn merge_wall_tiles(grid: &MazeGrid) -> Vec<(usize, usize, usize, usize)> {
     }
 
     rectangles
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn traversable_noise_limits_every_step() {
+        let terrain = Terrain::noise_traversable(DEFAULT_SEED);
+        for pair in terrain.blocks.windows(2) {
+            assert!((pair[1].top() - pair[0].top()).abs() <= TRAVERSABLE_MAX_STEP + 0.001);
+        }
+    }
+
+    #[test]
+    fn plain_noise_has_the_same_column_layout() {
+        let plain = Terrain::noise(DEFAULT_SEED);
+        let traversable = Terrain::noise_traversable(DEFAULT_SEED);
+        assert_eq!(plain.blocks.len(), traversable.blocks.len());
+        for (a, b) in plain.blocks.iter().zip(&traversable.blocks) {
+            assert_eq!(a.x, b.x);
+            assert_eq!(a.width, b.width);
+        }
+    }
 }

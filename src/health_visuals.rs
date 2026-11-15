@@ -196,7 +196,7 @@ mod tests {
     fn bars_and_tint_update_after_damage_death_and_respawn() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .insert_resource(Match::new(Terrain::flat()))
+            .insert_resource(Match::new(Terrain::flat(), crate::sim::ScrollMode::Free))
             .add_systems(
                 PostUpdate,
                 (spawn_health_bars, update_health_bars, tint_low_health).chain(),

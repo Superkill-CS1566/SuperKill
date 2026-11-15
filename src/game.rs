@@ -9,7 +9,7 @@ use crate::network::OnlineSession;
 use crate::player::PendingInputs;
 use crate::protocol::ONLINE_LEVEL;
 use crate::sim::{
-    MatchState, PlayerSide, SCREEN_COUNT, START_SCREEN, TICK_SECONDS, Terrain, TerrainKind,
+    MatchState, ScrollMode, PlayerSide, SCREEN_COUNT, START_SCREEN, TICK_SECONDS, Terrain, TerrainKind,
     ThrownSword, DEFAULT_SEED,
 };
 
@@ -107,8 +107,8 @@ pub struct Match {
 const SNAP_DISTANCE: f32 = 100.0;
 
 impl Match {
-    pub fn new(terrain: Terrain) -> Self {
-        let state = MatchState::new();
+    pub fn new(terrain: Terrain, scroll_mode: ScrollMode) -> Self {
+        let state = MatchState::new(scroll_mode);
         Self {
             previous: state.clone(),
             state,
@@ -250,13 +250,14 @@ fn setup_game(
     winner.0 = None;
 
     // online, everyone must collide with the same ground the server does
-    let kind = if online.is_some() {
-        ONLINE_LEVEL
+    let (kind, mode) = if online.is_some() {
+        (ONLINE_LEVEL, ScrollMode::Free)
     } else {
         match selected_level.0 {
-            LevelType::Flat => TerrainKind::Flat,
-            LevelType::Noise => TerrainKind::Noise,
-            LevelType::Maze => TerrainKind::Maze,
+            LevelType::Flat => (TerrainKind::Flat, ScrollMode::Free),
+            LevelType::Noise => (TerrainKind::Noise, ScrollMode::Free),
+            LevelType::Maze => (TerrainKind::Maze, ScrollMode::Free),
+            LevelType::Autoscroll => (TerrainKind::Noise, ScrollMode::Autoscroll)
         }
     };
     let terrain = Terrain::generate(kind, DEFAULT_SEED);
@@ -274,7 +275,7 @@ fn setup_game(
         ));
     }
 
-    commands.insert_resource(Match::new(terrain));
+    commands.insert_resource(Match::new(terrain, mode));
 }
 
 // ---------------------------------------------------------------- pause

@@ -5,7 +5,7 @@ use crate::common::{
     spawn_background_camera, spawn_ui_camera,
 };
 use crate::game::{GameState, Match};
-use crate::sim::ARENA_WIDTH;
+use crate::sim::{ARENA_WIDTH,ScrollMode};
 
 pub struct CameraPlugin;
 
@@ -76,6 +76,7 @@ fn smooth_camera_x(current: f32, target: f32, delta_secs: f32, snap: bool) -> f3
 // just eases toward it.
 pub fn camera_follow(
     time: Res<Time>,
+    fixed: Res<Time<Fixed>>,
     game: Res<Match>,
     mut follow: ResMut<CameraFollowState>,
     mut camera: Single<&mut Transform, With<UiCamera>>,
@@ -86,7 +87,20 @@ pub fn camera_follow(
     let screen = game.state.current_screen;
     let snap = !follow.initialized || screen != follow.screen;
 
-    camera.translation.x = smooth_camera_x(camera.translation.x, target, time.delta_secs(), snap);
+    if game.state.scroll_mode == ScrollMode::Autoscroll && !snap {
+        // The crush edge moves every tick, so an eased follow would trail it.
+        // Draw the exact position instead, partway between the last two ticks.
+        let bound = LEVEL_LEN / 2.0 - SCREEN_W / 2.0;
+        camera.translation.x = game
+            .previous
+            .arena_center
+            .lerp(game.state.arena_center, fixed.overstep_fraction())
+            .clamp(-bound, bound);
+    } else {
+        camera.translation.x =
+            smooth_camera_x(camera.translation.x, target, time.delta_secs(), snap);
+    }
+
     camera.translation.y = CAMERA_Y;
     follow.initialized = true;
     follow.screen = screen;
@@ -94,6 +108,8 @@ pub fn camera_follow(
 
 const PARALLAX_FACTOR: f32 = 0.4;
 
+
+// background camera follows ui camera
 pub fn background_camera_follow(
     gameplay_camera: Single<&Transform, (With<UiCamera>, Without<BackgroundCamera>)>,
     mut background_camera: Single<&mut Transform, (With<BackgroundCamera>, Without<UiCamera>)>,
