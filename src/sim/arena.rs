@@ -29,9 +29,15 @@ const SCREEN_INSET: f32 = 20.0;
 // Autoscrolling constants
 const SCROLL_SPEED: f32 = 90.0; // units per second
 const SCROLL_PER_TICK: f32 = SCROLL_SPEED * TICK_SECONDS;
-/// After a screen change in autoscroll, how far ahead (in the scroll's
-/// direction) of the leader the other fighter starts.
-const AUTOSCROLL_START_GAP: f32 = 120.0;
+/// Deaths a fighter can take before they're eliminated. MatchState::new
+/// starts both fighters with this many.
+pub const STARTING_LIVES: u8 = 3;
+/// How far ahead of the survivor the finish line goes once the other fighter
+/// is eliminated.
+const FINISH_DISTANCE: f32 = 1500.0;
+/// Respawns come in this far above the flat-ground height and land on
+/// whatever hill is there. Keep it above the tallest hill.
+const RESPAWN_DROP: f32 = 200.0;
 
 /// Everything after the fighters have moved and struck: deaths, screens, the
 /// play area, the crush edge, and respawns — in that order.
@@ -72,7 +78,15 @@ pub fn apply_kills(state: &mut MatchState, kills: &[Kill]) {
         victim.attack = None;
         // otherwise a throw in progress would finish after respawning
         victim.throw_ticks = None;
+
+        // autoscroll: each death costs a life
+        if state.scroll_mode == ScrollMode::Autoscroll && state.scroll_winner.is_none() {
+            let lives = &mut state.lives[kill.victim.index()];
+            *lives = lives.saturating_sub(1);
+        }
     }
+
+    check_elimination(state);
 
     let mut standing = Vec::new();
     for fighter in &state.fighters {
@@ -85,10 +99,40 @@ pub fn apply_kills(state: &mut MatchState, kills: &[Kill]) {
         1 => Some(standing[0]),
         _ => state.priority,
     };
+
+    // once someone is eliminated the survivor keeps priority for good
+    if let Some(winner) = state.scroll_winner {
+        state.priority = Some(winner);
+    }
+}
+
+/// Autoscroll: a fighter out of lives ends the scroll, and a finish line goes
+/// up ahead of the survivor.
+fn check_elimination(state: &mut MatchState) {
+    if state.scroll_mode != ScrollMode::Autoscroll || state.scroll_winner.is_some() {
+        return;
+    }
+    let survivor = match [state.lives[0] == 0, state.lives[1] == 0] {
+        [true, true] => {
+            state.lives = [1, 1]; // simultaneous: sudden death
+            return;
+        }
+        [true, false] => PlayerSide::Right,
+        [false, true] => PlayerSide::Left,
+        [false, false] => return,
+    };
+    state.scroll_winner = Some(survivor);
+    state.finish_x = Some(state.fighters[survivor.index()].x + survivor.advance_dir() * FINISH_DISTANCE);
 }
 
 // only the fighter holding priority may cross, and only toward their own goal
 fn screen_transition(state: &mut MatchState) {
+    // the autoscroll level is endless: no screens, just the finish line
+    if state.scroll_mode == ScrollMode::Autoscroll {
+        autoscroll_finish(state);
+        return;
+    }
+
     // neutral — nobody advances
     let Some(holder) = state.priority else {
         return;
@@ -127,29 +171,6 @@ fn screen_transition(state: &mut MatchState) {
     state.swords.clear();
     state.ground_weapons.clear();
 
-    if state.scroll_mode == ScrollMode::Autoscroll {
-        // The screen ends are outside a moving 768-wide arena, so placing
-        // fighters there would get them crushed at once. Start the arena in
-        // the middle of the new screen, heading toward the other fighter's
-        // goal, with both fighters inside it.
-        let center = 0.0;
-        state.scroll_heading = -dir;
-        state.arena_center = center;
-        for fighter in &mut state.fighters {
-            if fighter.is_dead() {
-                continue;
-            }
-            let offset = if fighter.side == holder {
-                0.0
-            } else {
-                -dir * AUTOSCROLL_START_GAP
-            };
-            fighter.x = center + offset;
-            fighter.vx = 0.0;
-        }
-        return;
-    }
-
     // leader enters from behind; the other fighter appears ahead of them
     for fighter in &mut state.fighters {
         if fighter.is_dead() {
@@ -158,6 +179,17 @@ fn screen_transition(state: &mut MatchState) {
         let sign = if fighter.side == holder { -1.0 } else { 1.0 };
         fighter.x = sign * (edge - SCREEN_INSET) * dir;
         fighter.vx = 0.0;
+    }
+}
+
+/// The survivor of an autoscroll match wins by reaching the finish line.
+fn autoscroll_finish(state: &mut MatchState) {
+    let (Some(winner), Some(finish_x)) = (state.scroll_winner, state.finish_x) else {
+        return;
+    };
+    let fighter = &state.fighters[winner.index()];
+    if !fighter.is_dead() && (fighter.x - finish_x) * winner.advance_dir() >= 0.0 {
+        state.winner = Some(winner);
     }
 }
 
@@ -173,9 +205,12 @@ fn update_scroll_heading(state: &mut MatchState) {
     }
 }
 
-/// The direction the play area is drifting. `None` outside autoscroll.
+/// The direction the play area is drifting. `None` outside autoscroll, and
+/// once someone is eliminated — then the scroll stops and the usual leader
+/// rules take over.
 fn scroll_dir(state: &MatchState) -> Option<f32> {
-    (state.scroll_mode == ScrollMode::Autoscroll).then_some(state.scroll_heading)
+    (state.scroll_mode == ScrollMode::Autoscroll && state.scroll_winner.is_none())
+        .then_some(state.scroll_heading)
 }
 
 // The three camera modes, now as gameplay: locked to the screen center when
@@ -186,9 +221,10 @@ fn update_arena_center(state: &mut MatchState) {
     let half_view = ARENA_WIDTH / 2.0;
     let bound = LEVEL_LEN / 2.0 - half_view;
 
-    // autoscroll: the area moves on its own, whoever is alive or leading
+    // autoscroll: the area moves on its own, whoever is alive or leading, and
+    // the level has no end to stop at
     if let Some(dir) = scroll_dir(state) {
-        state.arena_center = (state.arena_center + SCROLL_PER_TICK * dir).clamp(-bound, bound);
+        state.arena_center += SCROLL_PER_TICK * dir;
         return;
     }
 
@@ -214,12 +250,18 @@ fn update_arena_center(state: &mut MatchState) {
         }
     };
 
-    state.arena_center = target.clamp(-bound, bound);
+    // the autoscroll level is endless, so the survivor can run past LEVEL_LEN
+    state.arena_center = if state.scroll_mode == ScrollMode::Autoscroll {
+        target
+    } else {
+        target.clamp(-bound, bound)
+    };
 }
 
 // Keeps everyone inside the play area. For the trailing fighter the back edge
 // is lethal: if the leader outruns them, the edge catches them and they die.
-// (Autoscroll has its own version: the edge is lethal for anyone it passes.)
+// (Autoscroll has its own version while it's scrolling: the edge is lethal
+// for anyone it passes.)
 fn cage_and_crush(state: &mut MatchState) -> Vec<Kill> {
     if let Some(dir) = scroll_dir(state) {
         return autoscroll_crush(state, dir);
@@ -327,18 +369,24 @@ fn respawn(state: &mut MatchState) {
                 let dir = holder.advance_dir();
                 let advanced = (holder_x - death.killer_x) * dir;
 
-                // positions reset on a screen change, so the distance check is
-                // only meaningful within one screen — and a new screen is a
-                // checkpoint that brings anyone down back
-                if !state.screen_changed_this_tick
+                if state.scroll_mode == ScrollMode::Autoscroll {
+                    // no screens to cross, and the leader is being pushed back
+                    // rather than advancing: the timer decides
+                    if !waited_long_enough {
+                        continue;
+                    }
+                } else if !state.screen_changed_this_tick
                     && !waited_long_enough
                     && advanced < RESPAWN_ADVANCE
                 {
+                    // positions reset on a screen change, so the distance check
+                    // is only meaningful within one screen — and a new screen is
+                    // a checkpoint that brings anyone down back
                     continue;
                 }
-                // Free: the edge the leader is pushing toward. Autoscroll: that
-                // edge is the lethal one, so appear on the side the area is
-                // moving toward instead.
+                // Free: the edge the leader is pushing toward. Autoscroll while
+                // scrolling: that edge is the lethal one, so appear on the side
+                // the area is moving toward instead.
                 let spawn_dir = scroll_dir(state).unwrap_or(dir);
                 state.arena_center + (half_view - RESPAWN_INSET) * spawn_dir
             }
@@ -349,15 +397,24 @@ fn respawn(state: &mut MatchState) {
                 if !waited_long_enough {
                     continue;
                 }
+                let own_mark = state.fighters[index].side.spawn_x();
                 match scroll_dir(state) {
                     // their own mark could be behind the edge and kill them
                     // at once, so come in on the leading side
                     Some(dir) => state.arena_center + (half_view - RESPAWN_INSET) * dir,
-                    None => state.fighters[index].side.spawn_x(),
+                    // endless level: marks are relative to where the area is
+                    None if state.scroll_mode == ScrollMode::Autoscroll => {
+                        state.arena_center + own_mark
+                    }
+                    None => own_mark,
                 }
             }
         };
 
         state.fighters[index].respawn_at(respawn_x);
+        if state.scroll_mode == ScrollMode::Autoscroll {
+            // drop in from above: respawn_at uses the flat-ground height
+            state.fighters[index].y += RESPAWN_DROP;
+        }
     }
 }

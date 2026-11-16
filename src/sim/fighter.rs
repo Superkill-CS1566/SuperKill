@@ -575,7 +575,10 @@ impl FighterState {
 
         // ---- horizontal: step, then push out of anything walked into
         let mut new_x = self.x + self.vx * TICK_SECONDS;
-        new_x = new_x.clamp(-LEVEL_LEN / 2.0 + half_w, LEVEL_LEN / 2.0 - half_w);
+        // an endless level has no edges to be clamped to
+        if !terrain.endless {
+            new_x = new_x.clamp(-LEVEL_LEN / 2.0 + half_w, LEVEL_LEN / 2.0 - half_w);
+        }
 
         for block in &terrain.blocks {
             let overlaps_x =
@@ -618,8 +621,13 @@ impl FighterState {
 
         // Respawn Logic — fell out of the level, back to this fighter's own side
         if new_y < KILL_PLANE_Y {
-            new_y = PLAYER_SPAWN_Y;
-            self.x = self.side.spawn_x();
+            if terrain.endless {
+                // no "own side" in an endless level — back onto the ground here
+                new_y = terrain.surface_below(self.x, f32::MAX) + half_h;
+            } else {
+                new_y = PLAYER_SPAWN_Y;
+                self.x = self.side.spawn_x();
+            }
             self.vx = 0.0;
             self.vy = 0.0;
         }
@@ -755,7 +763,7 @@ mod tests {
                 height,
             });
         }
-        let terrain = Terrain { blocks };
+        let terrain = Terrain { blocks, ..Default::default() };
 
         for &(x, width, height) in &platforms {
             for direction in [1.0, -1.0] {

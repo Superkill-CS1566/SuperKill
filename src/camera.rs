@@ -5,7 +5,7 @@ use crate::common::{
     spawn_background_camera, spawn_ui_camera,
 };
 use crate::game::{GameState, Match};
-use crate::sim::{ARENA_WIDTH,ScrollMode};
+use crate::sim::{ARENA_WIDTH, ScrollMode};
 
 pub struct CameraPlugin;
 
@@ -61,14 +61,20 @@ pub fn init_camera_zoom(
     follow.initialized = false;
 }
 
-fn smooth_camera_x(current: f32, target: f32, delta_secs: f32, snap: bool) -> f32 {
-    let bound = LEVEL_LEN / 2.0 - SCREEN_W / 2.0;
-    let target = target.clamp(-bound, bound);
+// The easing on its own, with no level edges. Autoscroll uses it directly,
+// since that level never ends.
+fn ease_toward(current: f32, target: f32, delta_secs: f32, snap: bool) -> f32 {
     if snap {
         return target;
     }
     let blend = 1.0 - (-FOLLOW_SPEED * delta_secs.max(0.0)).exp();
-    (current + (target - current) * blend).clamp(-bound, bound)
+    current + (target - current) * blend
+}
+
+fn smooth_camera_x(current: f32, target: f32, delta_secs: f32, snap: bool) -> f32 {
+    let bound = LEVEL_LEN / 2.0 - SCREEN_W / 2.0;
+    let target = target.clamp(-bound, bound);
+    ease_toward(current, target, delta_secs, snap).clamp(-bound, bound)
 }
 
 // The simulation decides where the play area is — locked to the screen center
@@ -87,20 +93,20 @@ pub fn camera_follow(
     let screen = game.state.current_screen;
     let snap = !follow.initialized || screen != follow.screen;
 
-    if game.state.scroll_mode == ScrollMode::Autoscroll && !snap {
-        // The crush edge moves every tick, so an eased follow would trail it.
-        // Draw the exact position instead, partway between the last two ticks.
-        let bound = LEVEL_LEN / 2.0 - SCREEN_W / 2.0;
-        camera.translation.x = game
-            .previous
+    let autoscroll = game.state.scroll_mode == ScrollMode::Autoscroll;
+    let scrolling = autoscroll && game.state.scroll_winner.is_none();
+
+    camera.translation.x = if scrolling && !snap {
+        // The edge moves every tick, so an eased follow would trail it. Draw the
+        // exact position instead, partway between the last two ticks.
+        game.previous
             .arena_center
             .lerp(game.state.arena_center, fixed.overstep_fraction())
-            .clamp(-bound, bound);
+    } else if autoscroll {
+        ease_toward(camera.translation.x, target, time.delta_secs(), snap)
     } else {
-        camera.translation.x =
-            smooth_camera_x(camera.translation.x, target, time.delta_secs(), snap);
-    }
-
+        smooth_camera_x(camera.translation.x, target, time.delta_secs(), snap)
+    };
     camera.translation.y = CAMERA_Y;
     follow.initialized = true;
     follow.screen = screen;
@@ -111,10 +117,17 @@ const PARALLAX_FACTOR: f32 = 0.4;
 
 // background camera follows ui camera
 pub fn background_camera_follow(
+    game: Res<Match>,
     gameplay_camera: Single<&Transform, (With<UiCamera>, Without<BackgroundCamera>)>,
     mut background_camera: Single<&mut Transform, (With<BackgroundCamera>, Without<UiCamera>)>,
 ) {
-    background_camera.translation.x = gameplay_camera.translation.x * PARALLAX_FACTOR;
+    // autoscroll never ends and the backdrop is one image, so hold it still
+    // rather than letting it scroll off
+    background_camera.translation.x = if game.state.scroll_mode == ScrollMode::Autoscroll {
+        0.0
+    } else {
+        gameplay_camera.translation.x * PARALLAX_FACTOR
+    };
 
     background_camera.translation.y = CAMERA_Y * PARALLAX_FACTOR;
 }

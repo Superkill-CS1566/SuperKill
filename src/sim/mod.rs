@@ -13,7 +13,7 @@ pub mod weapons;
 
 use serde::{Deserialize, Serialize};
 
-pub use arena::{ARENA_WIDTH, SCREEN_COUNT, START_SCREEN};
+pub use arena::{ARENA_WIDTH, SCREEN_COUNT, START_SCREEN, STARTING_LIVES};
 pub use combat::Kill;
 pub use fighter::{AttackType, Death, FighterState, PlayerSide, Rect};
 pub use terrain::{Block, Terrain, TerrainKind, DEFAULT_SEED};
@@ -73,8 +73,13 @@ pub struct MatchState {
     /// Who owns the camera and may advance screens. None means neutral.
     pub priority: Option<PlayerSide>,
     pub current_screen: usize,
+
+    // AutoScoller parameters
     pub scroll_mode: ScrollMode,
     pub scroll_heading: f32,
+    pub lives: [u8; 2],                   // indexed by PlayerSide::index()
+    pub scroll_winner: Option<PlayerSide>,
+    pub finish_x: Option<f32>,
     /// True for the one tick a screen transition happens. It's the respawn
     /// checkpoint, and it tells the camera to cut rather than pan.
     pub screen_changed_this_tick: bool,
@@ -102,6 +107,9 @@ impl MatchState {
             current_screen: START_SCREEN,
             scroll_mode: scroll_mode,
             scroll_heading: 1.0,
+            lives: [STARTING_LIVES; 2],
+            scroll_winner: None,
+            finish_x: None,
             screen_changed_this_tick: false,
             arena_center: 0.0,
             winner: None,
