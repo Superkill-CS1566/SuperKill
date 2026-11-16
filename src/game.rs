@@ -1,8 +1,6 @@
-use bevy::prelude::*;
 use bevy::camera::visibility::RenderLayers;
+use bevy::prelude::*;
 
-use std::collections::HashSet;
-use std::time::Instant;
 use crate::common::{AppState, BACKGROUND_LAYER};
 use crate::level_select::{LevelType, SelectedLevel};
 use crate::loading::{LoadingAssets, despawn_with};
@@ -10,9 +8,11 @@ use crate::network::OnlineSession;
 use crate::player::PendingInputs;
 use crate::protocol::ONLINE_LEVEL;
 use crate::sim::{
-    MatchState, PlayerSide, SCREEN_COUNT, START_SCREEN, TICK_SECONDS, Terrain, TerrainKind,
-    ThrownSword, DEFAULT_SEED, ScrollMode,
+    DEFAULT_SEED, MatchState, PlayerSide, SCREEN_COUNT, START_SCREEN, ScrollMode, TICK_SECONDS,
+    Terrain, TerrainKind, ThrownSword,
 };
+use std::collections::HashSet;
+use std::time::Instant;
 
 pub struct GamePlugin;
 
@@ -35,7 +35,12 @@ impl Plugin for GamePlugin {
             .add_systems(
                 Update,
                 (
-                    (update_background, check_winner, sync_terrain_sprites, show_finish_line)
+                    (
+                        update_background,
+                        check_winner,
+                        sync_terrain_sprites,
+                        show_finish_line,
+                    )
                         .run_if(in_state(AppState::InGame))
                         .run_if(resource_exists::<Match>),
                     toggle_pause.run_if(in_state(AppState::InGame)),
@@ -48,7 +53,7 @@ impl Plugin for GamePlugin {
                 Update,
                 time_presses
                     .run_if(in_state(AppState::InGame))
-                    .run_if(resource_exists::<Match>)
+                    .run_if(resource_exists::<Match>),
             )
             .add_systems(
                 OnExit(AppState::InGame),
@@ -122,7 +127,11 @@ impl Match {
     pub fn drawn_position(&self, side: PlayerSide, alpha: f32) -> Vec2 {
         let before = self.previous.fighter(side);
         let now = self.state.fighter(side);
-        blend(Vec2::new(before.x, before.y), Vec2::new(now.x, now.y), alpha)
+        blend(
+            Vec2::new(before.x, before.y),
+            Vec2::new(now.x, now.y),
+            alpha,
+        )
     }
 
     /// The same for a thrown sword. One thrown this tick is drawn where it is.
@@ -196,12 +205,26 @@ const BG_PATHS: &[&str] = &[
 // one background per screen — this fails to compile if the two drift apart
 const _: () = assert!(BG_PATHS.len() == SCREEN_COUNT);
 
+const TILE_PX: u32 = 40; // size of one tile in the image, in pixels
+const TILE_WORLD: f32 = 40.0; // how big a tile should be in the world
+const TILE_SCALE: f32 = TILE_WORLD / TILE_PX as f32;
+const SURFACE_H: f32 = TILE_WORLD; // thickness of the surface strip
+const SURFACE_TILE: usize = 0;
+const FILL_TILE: usize = 1;
+
+#[derive(Resource)]
+struct TerrainTiles {
+    image: Handle<Image>,
+    layout: Handle<TextureAtlasLayout>,
+}
+
 // add stuff for loading in foreground later for now just background
 // might put it in separate file since its more a part of procedural gen
 fn load_level(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     mut loading_assets: ResMut<LoadingAssets>,
+    mut layouts: ResMut<Assets<TextureAtlasLayout>>,
 ) {
     let mut handles = Vec::new();
     for path in BG_PATHS {
@@ -210,6 +233,18 @@ fn load_level(
         handles.push(handle);
     }
     commands.insert_resource(Backgrounds(handles));
+
+    // handle terrain texture atlas
+    let image: Handle<Image> = asset_server.load("sprites/tiles/terrain_ground.png");
+    loading_assets.0.push(image.clone().untyped()); // loading screen waits for it
+    let layout = layouts.add(TextureAtlasLayout::from_grid(
+        UVec2::splat(TILE_PX),
+        2,
+        1,
+        None,
+        None,
+    ));
+    commands.insert_resource(TerrainTiles { image, layout });
 }
 
 fn setup_level(mut commands: Commands, backgrounds: Res<Backgrounds>) {
@@ -248,6 +283,7 @@ fn setup_game(
     online: Option<Res<OnlineSession>>,
     mut winner: ResMut<Winner>,
     mut next_game_state: ResMut<NextState<GameState>>,
+    tiles: Res<TerrainTiles>,
 ) {
     next_game_state.set(GameState::Playing);
     winner.0 = None;
@@ -269,15 +305,13 @@ fn setup_game(
     // sprites are kept in step with its window by sync_terrain_sprites instead.
     if !terrain.endless {
         for block in &terrain.blocks {
-            commands.spawn((
-                Sprite {
-                    color: Color::srgb(0.25, 0.25, 0.3),
-                    custom_size: Some(Vec2::new(block.width, block.height)),
-                    ..default()
-                },
-                Transform::from_xyz(block.x, block.y, 0.0),
-                TerrainSprite,
-            ));
+            spawn_block(
+                &mut commands,
+                &tiles,
+                Vec2::new(block.x, block.y),
+                Vec2::new(block.width, block.height),
+                None,
+            );
         }
     }
 
@@ -298,6 +332,7 @@ fn sync_terrain_sprites(
     mut commands: Commands,
     game: Res<Match>,
     sprites: Query<(Entity, &TerrainColumn)>,
+    tiles: Res<TerrainTiles>,
 ) {
     if !game.terrain.endless {
         return;
@@ -318,16 +353,13 @@ fn sync_terrain_sprites(
         if drawn.contains(&col) {
             continue;
         }
-        commands.spawn((
-            Sprite {
-                color: Color::srgb(0.25, 0.25, 0.3),
-                custom_size: Some(Vec2::new(block.width, block.height)),
-                ..default()
-            },
-            Transform::from_xyz(block.x, block.y, 0.0),
-            TerrainSprite,
-            TerrainColumn(col),
-        ));
+        spawn_block(
+            &mut commands,
+            &tiles,
+            Vec2::new(block.x, block.y),
+            Vec2::new(block.width, block.height),
+            Some(col),
+        );
     }
 }
 
@@ -468,6 +500,50 @@ fn spawn_pause_menu(commands: &mut Commands) {
         });
 }
 
+fn spawn_block(
+    commands: &mut Commands,
+    tiles: &TerrainTiles,
+    center: Vec2,
+    size: Vec2,
+    column: Option<i32>, // Some(col) for endless terrain, so sync can find it
+) {
+    let surface_h = SURFACE_H.min(size.y);
+    let fill_h = size.y - surface_h;
+
+    let mut layer = |index: usize, y: f32, height: f32| {
+        let mut entity = commands.spawn((
+            Sprite {
+                image: tiles.image.clone(),
+                texture_atlas: Some(TextureAtlas {
+                    layout: tiles.layout.clone(),
+                    index,
+                }),
+                custom_size: Some(Vec2::new(size.x, height)),
+                image_mode: SpriteImageMode::Tiled {
+                    tile_x: true, // wide blocks (flat floor, maze walls) repeat
+                    tile_y: true, // the fill repeats down the column
+                    stretch_value: TILE_SCALE,
+                },
+                ..default()
+            },
+            Transform::from_xyz(center.x, y, 0.0),
+            TerrainSprite,
+        ));
+        if let Some(col) = column {
+            entity.insert(TerrainColumn(col));
+        }
+    };
+
+    layer(
+        SURFACE_TILE,
+        center.y + size.y / 2.0 - surface_h / 2.0,
+        surface_h,
+    );
+    if fill_h > 0.0 {
+        layer(FILL_TILE, center.y - size.y / 2.0 + fill_h / 2.0, fill_h);
+    }
+}
+
 fn pause_menu_interaction(
     mut query: Query<(&Interaction, &PauseButton), (Changed<Interaction>, With<Button>)>,
     mut next_app_state: ResMut<NextState<AppState>>,
@@ -527,7 +603,11 @@ fn time_presses(
             let ms = start.elapsed().as_secs_f64() * 1000.0;
             *total += ms;
             *count += 1;
-            println!("press {}: {ms:.1} ms (average {:.1} ms)", *count, *total / *count as f64);
+            println!(
+                "press {}: {ms:.1} ms (average {:.1} ms)",
+                *count,
+                *total / *count as f64
+            );
             *started = None;
         }
     }
