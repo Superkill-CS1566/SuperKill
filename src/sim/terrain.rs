@@ -6,8 +6,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::{GROUND_THICKNESS, GROUND_Y, LEVEL_LEN};
-use crate::perlin_noise::sample_chunk;
+use super::{ARENA_WIDTH, GROUND_THICKNESS, GROUND_Y, LEVEL_LEN};
+use crate::perlin_noise::{sample_chunk, terrain_at_column};
 use crate::recursive_generation::{rd_generate_maze, MazeGrid, Tile};
 
 /// One solid block, by center and size — the same shape the old `Platform`
@@ -39,6 +39,9 @@ impl Block {
 pub enum TerrainKind {
     /// The real level: hills from Perlin noise.
     Noise,
+    /// Endless noise hills, generated around the play area as it scrolls —
+    /// for the autoscroll level.
+    NoiseEndless,
     /// Testing only — a single flat floor.
     Flat,
     /// Testing only — a recursive-division maze.
@@ -55,6 +58,13 @@ const NOISE_BLOCK_WIDTH: f32 = 40.0;
 const NOISE_AMPLITUDE: f32 = GROUND_THICKNESS;
 const NOISE_BOTTOM_Y: f32 = -400.0;
 
+// endless terrain
+/// Hill height for the endless level. Separate from NOISE_AMPLITUDE so the
+/// two levels can be tuned apart — lower this if the step test fails.
+const ENDLESS_AMPLITUDE: f32 = NOISE_AMPLITUDE;
+/// How far each side of the play area's center stays generated.
+const WINDOW_HALF_WIDTH: f32 = ARENA_WIDTH * 1.5;
+
 // maze terrain
 const MAZE_WIDTH: usize = 39;
 const MAZE_HEIGHT: usize = 21;
@@ -65,12 +75,19 @@ const MAZE_LEVEL: u32 = 1;
 #[derive(Clone, Debug, Default)]
 pub struct Terrain {
     pub blocks: Vec<Block>,
+    /// Endless terrain has no level edges: fighters aren't clamped to
+    /// `LEVEL_LEN`, and `blocks` is only a window around the play area.
+    pub endless: bool,
+    /// Column index of `blocks[0]`. Endless terrain only.
+    pub first_col: i32,
+    pub seed: u64,
 }
 
 impl Terrain {
     pub fn generate(kind: TerrainKind, seed: u64) -> Self {
         match kind {
             TerrainKind::Noise => Self::noise(seed),
+            TerrainKind::NoiseEndless => Self::noise_endless(seed),
             TerrainKind::Flat => Self::flat(),
             TerrainKind::Maze => Self::maze(seed, MAZE_LEVEL),
         }
@@ -85,6 +102,7 @@ impl Terrain {
                 width: LEVEL_LEN,
                 height: GROUND_THICKNESS,
             }],
+            ..Default::default()
         }
     }
 
@@ -106,7 +124,43 @@ impl Terrain {
                 height,
             });
         }
-        Self { blocks }
+        Self {
+            blocks,
+            ..Default::default()
+        }
+    }
+
+    /// Endless hills. Every column's height is a pure function of its index
+    /// and the seed, so the server and every client build identical ground no
+    /// matter where their windows started.
+    pub fn noise_endless(seed: u64) -> Self {
+        let mut terrain = Self {
+            endless: true,
+            seed,
+            ..Default::default()
+        };
+        terrain.update_window(0.0);
+        terrain
+    }
+
+    /// Keep the columns around `center` generated and drop the rest. Call once
+    /// per tick, before the match steps, with the play area's center. Does
+    /// nothing for finite terrain.
+    pub fn update_window(&mut self, center: f32) {
+        if !self.endless {
+            return;
+        }
+        let first = ((center - WINDOW_HALF_WIDTH) / NOISE_BLOCK_WIDTH).floor() as i32;
+        let last = ((center + WINDOW_HALF_WIDTH) / NOISE_BLOCK_WIDTH).ceil() as i32;
+        let have = self.blocks.len() as i32;
+        if have > 0 && first == self.first_col && last == self.first_col + have - 1 {
+            return;
+        }
+
+        self.first_col = first;
+        self.blocks = (first..=last)
+            .map(|col| endless_column(col, self.seed))
+            .collect();
     }
 
     /// The old `spawn_maze`: wall tiles merged into as few rectangles as
@@ -126,7 +180,10 @@ impl Terrain {
                 height: height as f32 * MAZE_TILE_SIZE,
             });
         }
-        Self { blocks }
+        Self {
+            blocks,
+            ..Default::default()
+        }
     }
 
     /// The top of the ground directly under `x`. Prefers the highest surface
@@ -158,6 +215,18 @@ impl Terrain {
 
         // fall back to where it already is if there's somehow no ground at all
         below.or(highest).unwrap_or(from_y)
+    }
+}
+
+/// One endless column, centered on `col * NOISE_BLOCK_WIDTH`.
+fn endless_column(col: i32, seed: u64) -> Block {
+    let surface_y = GROUND_Y + terrain_at_column(col, seed) * ENDLESS_AMPLITUDE + ENDLESS_AMPLITUDE;
+    let height = surface_y - NOISE_BOTTOM_Y;
+    Block {
+        x: col as f32 * NOISE_BLOCK_WIDTH,
+        y: NOISE_BOTTOM_Y + height / 2.0,
+        width: NOISE_BLOCK_WIDTH,
+        height,
     }
 }
 
@@ -215,4 +284,51 @@ fn merge_wall_tiles(grid: &MazeGrid) -> Vec<(usize, usize, usize, usize)> {
     }
 
     rectangles
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A full jump peaks near 102 units; steps well under that stay clearable
+    /// with the edge closing in.
+    const MAX_STEP: f32 = 40.0;
+
+    #[test]
+    fn endless_steps_stay_jumpable_everywhere() {
+        let mut terrain = Terrain::noise_endless(DEFAULT_SEED);
+        // far left, the origin, and far right — covers negative columns
+        for center in [-50_000.0, -1_000.0, 0.0, 12_345.0, 50_000.0] {
+            terrain.update_window(center);
+            for pair in terrain.blocks.windows(2) {
+                let step = (pair[1].top() - pair[0].top()).abs();
+                assert!(step <= MAX_STEP, "step of {step} near x = {}", pair[0].x);
+            }
+        }
+    }
+
+    #[test]
+    fn endless_window_follows_the_center_and_matches_pure_columns() {
+        let mut terrain = Terrain::noise_endless(DEFAULT_SEED);
+        terrain.update_window(5_000.0);
+
+        let first = terrain.blocks.first().unwrap();
+        let last = terrain.blocks.last().unwrap();
+        assert!(first.x < 5_000.0 - ARENA_WIDTH && last.x > 5_000.0 + ARENA_WIDTH);
+
+        // the same column built from a different window is identical
+        let col = terrain.first_col + 3;
+        let mut other = Terrain::noise_endless(DEFAULT_SEED);
+        other.update_window(col as f32 * NOISE_BLOCK_WIDTH);
+        let a = terrain.blocks[3];
+        let b = other.blocks[(col - other.first_col) as usize];
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn finite_noise_is_unchanged() {
+        let terrain = Terrain::noise(DEFAULT_SEED);
+        assert!(!terrain.endless);
+        assert_eq!(terrain.blocks.len(), (LEVEL_LEN / NOISE_BLOCK_WIDTH) as usize + 1);
+    }
 }

@@ -15,7 +15,7 @@ use tokio::net::UdpSocket;
 use tokio::time::interval;
 
 use superkill::protocol::{ClientMessage, ServerMessage, ONLINE_LEVEL, SERVER_PORT};
-use superkill::sim::{Input, MatchState, PlayerSide, Terrain, DEFAULT_SEED, TICK_SECONDS};
+use superkill::sim::{Input, MatchState, ScrollMode, PlayerSide, Terrain, DEFAULT_SEED, TICK_SECONDS};
 
 /// A client silent this long has their fighter stand still, so a stalled
 /// connection doesn't leave them running in one direction.
@@ -39,7 +39,7 @@ async fn main() -> io::Result<()> {
     println!("Server listening on port {SERVER_PORT}");
 
     let terrain = Terrain::generate(ONLINE_LEVEL, DEFAULT_SEED);
-    let mut game = MatchState::new();
+    let mut game = MatchState::new(ScrollMode::Free);
     // each fighter's input for the next tick, built up from their packets
     let mut pending = [Input::default(); 2];
     let mut clients: HashMap<SocketAddr, Client> = HashMap::new();
@@ -67,7 +67,7 @@ async fn main() -> io::Result<()> {
                 for side in left {
                     broadcast(&socket, &clients, &ServerMessage::PlayerLeft { side }).await;
                     // the match can't go on one-sided; start over once they're replaced
-                    game = MatchState::new();
+                    game = MatchState::new(ScrollMode::Free);
                     pending = [Input::default(); 2];
                     ticks_since_win = 0;
                 }
@@ -88,7 +88,7 @@ async fn main() -> io::Result<()> {
                         ticks_since_win += 1;
                         if ticks_since_win >= RESTART_DELAY_TICKS {
                             println!("Starting a new match");
-                            game = MatchState::new();
+                            game = MatchState::new(ScrollMode::Free);
                             ticks_since_win = 0;
                         }
                     } else {
@@ -154,7 +154,7 @@ async fn main() -> io::Result<()> {
                         // a new pairing starts a fresh match
                         if clients.len() == 2 {
                             println!("Both players here — starting the match");
-                            game = MatchState::new();
+                            game = MatchState::new(ScrollMode::Free);
                             pending = [Input::default(); 2];
                             ticks_since_win = 0;
                         }

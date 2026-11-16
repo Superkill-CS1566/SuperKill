@@ -13,7 +13,7 @@ pub mod weapons;
 
 use serde::{Deserialize, Serialize};
 
-pub use arena::{ARENA_WIDTH, SCREEN_COUNT, START_SCREEN};
+pub use arena::{ARENA_WIDTH, SCREEN_COUNT, START_SCREEN, STARTING_LIVES};
 pub use combat::Kill;
 pub use fighter::{AttackType, Death, FighterState, PlayerSide, Rect};
 pub use terrain::{Block, Terrain, TerrainKind, DEFAULT_SEED};
@@ -50,6 +50,13 @@ pub struct Input {
     pub throw: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum ScrollMode {
+    #[default]
+    Free,        // existing behavior: arena follows the fighters
+    Autoscroll,  // arena drifts toward the non-holder's goal
+}
+
 /// Everything about a match that changes while it's played.
 ///
 /// The terrain isn't in here: it never changes mid-match, so it's passed to
@@ -66,6 +73,13 @@ pub struct MatchState {
     /// Who owns the camera and may advance screens. None means neutral.
     pub priority: Option<PlayerSide>,
     pub current_screen: usize,
+
+    // AutoScoller parameters
+    pub scroll_mode: ScrollMode,
+    pub scroll_heading: f32,
+    pub lives: [u8; 2],                   // indexed by PlayerSide::index()
+    pub scroll_winner: Option<PlayerSide>,
+    pub finish_x: Option<f32>,
     /// True for the one tick a screen transition happens. It's the respawn
     /// checkpoint, and it tells the camera to cut rather than pan.
     pub screen_changed_this_tick: bool,
@@ -80,7 +94,7 @@ pub struct MatchState {
 }
 
 impl MatchState {
-    pub fn new() -> Self {
+    pub fn new(scroll_mode: ScrollMode) -> Self {
         Self {
             tick: 0,
             fighters: [
@@ -91,6 +105,11 @@ impl MatchState {
             ground_weapons: Vec::new(),
             priority: None,
             current_screen: START_SCREEN,
+            scroll_mode: scroll_mode,
+            scroll_heading: 1.0,
+            lives: [STARTING_LIVES; 2],
+            scroll_winner: None,
+            finish_x: None,
             screen_changed_this_tick: false,
             arena_center: 0.0,
             winner: None,
@@ -150,7 +169,7 @@ impl MatchState {
 
 impl Default for MatchState {
     fn default() -> Self {
-        Self::new()
+        Self::new(ScrollMode::Free)
     }
 }
 
@@ -171,7 +190,7 @@ mod tests {
     /// Two fighters settled on a flat floor, `gap` apart and facing each other.
     fn duel(gap: f32) -> (MatchState, Terrain) {
         let terrain = Terrain::flat();
-        let mut state = MatchState::new();
+        let mut state = MatchState::new(ScrollMode::Free);
         idle(&mut state, &terrain, 10);
 
         state.fighters[0].x = -gap / 2.0;
