@@ -198,10 +198,13 @@ fn remove_match(mut commands: Commands) {
 const BG_OFFSET_Y: f32 = 65.0;
 
 const BG_PATHS: &[&str] = &[
-    "backgrounds/street.png",
-    "backgrounds/hills.png", // start screen
-    "white_grid_inverted.png",
+    "backgrounds/bamboo_forest_ground_level.png",       // Screen 1: Bamboo Forest
+    "backgrounds/bamboo_mountains_1920x720.png",        // Screen 2: Bamboo Mountains
+    "backgrounds/hills.png",                            // Screen 3: Starting Screen
+    "backgrounds/sakura_peaks.png",                     // Screen 4: Sakura Mountains
+    "backgrounds/cherry_blossom_forest_1920x720.png",   // Screen 5: Cherry Blossom Forest
 ];
+
 // one background per screen — this fails to compile if the two drift apart
 const _: () = assert!(BG_PATHS.len() == SCREEN_COUNT);
 

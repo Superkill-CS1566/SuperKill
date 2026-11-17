@@ -21,9 +21,9 @@ const RESPAWN_ADVANCE: f32 = 220.0;
 const RESPAWN_INSET: f32 = 60.0;
 const RESPAWN_MAX_WAIT_TICKS: u16 = ticks(4.0);
 
-pub const SCREEN_COUNT: usize = 3;
+pub const SCREEN_COUNT: usize = 5;
 /// Every match starts on the middle screen.
-pub const START_SCREEN: usize = 1;
+pub const START_SCREEN: usize = 2;
 const SCREEN_INSET: f32 = 20.0;
 
 // Autoscrolling constants
