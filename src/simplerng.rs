@@ -29,22 +29,24 @@ impl SimpleRng {
         self.state
     }
 
-    // Uses the rng function to get a random number that's either odd or even
-    pub fn range(&mut self, low: usize, high: usize, is_odd: bool) -> usize {
+    // Uses the rng function to get a random number. Removed the odd/even requirement
+    // as that check is now in the function, and some usages could give both.
+    pub fn range(&mut self, low: usize, high: usize) -> usize {
         if low >= high {
             return low;
         }
         let random = self.next() as usize;
         let range = high - low + 1;
-        let mut val = (random % range) + low;
-        if (val % 2 == 0 && is_odd) || (val % 2 == 1 && !is_odd) {
-            if val + 1 <= high {
-                val += 1;
-            } else if val - 1 >= low {
-                val -= 1;
-            }
-        }
+        let val = (random % range) + low;
         val
+    }
+
+    pub fn mostly_false(&mut self) -> bool {
+        let random = self.next();
+        if random % 5 == 0 {
+            return true;
+        }
+        return false;
     }
 
     pub fn shuffle<T>(&mut self, values: &mut [T]) {

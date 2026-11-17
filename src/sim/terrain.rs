@@ -57,8 +57,8 @@ const NOISE_BOTTOM_Y: f32 = -400.0;
 
 // maze terrain
 const MAZE_WIDTH: usize = 39;
-const MAZE_HEIGHT: usize = 21;
-const MAZE_TILE_SIZE: f32 = 50.0;
+const MAZE_HEIGHT: usize = 3;
+const MAZE_TILE_SIZE: f32 = 100.0;
 /// The old `spawn_maze` always generated maze level 1.
 const MAZE_LEVEL: u32 = 1;
 
@@ -110,12 +110,12 @@ impl Terrain {
     }
 
     /// The old `spawn_maze`: wall tiles merged into as few rectangles as
-    /// possible, centered on the origin.
+    /// possible, centered slightly above the origin to incorporate the floor.
     pub fn maze(seed: u64, level: u32) -> Self {
         let grid = rd_generate_maze(MAZE_WIDTH, MAZE_HEIGHT, seed, level);
 
         let start_x = -(grid.width() as f32 * MAZE_TILE_SIZE) / 2.0;
-        let start_y = (grid.height() as f32 * MAZE_TILE_SIZE) / 2.0;
+        let start_y = (grid.height() as f32 * MAZE_TILE_SIZE) / 2.0 - 120.0;
 
         let mut blocks = Vec::new();
         for (x, y, width, height) in merge_wall_tiles(&grid) {
