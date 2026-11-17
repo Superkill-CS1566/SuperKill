@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 
 use crate::common::{despawn_ui_camera, spawn_ui_camera, AppState};
-use crate::recursive_generation::{rd_generate_maze, Tile};
+use crate::recursive_generation::{old_rd_generate_maze, Tile};
 
 const MAZE_WIDTH: usize = 31;
 const MAZE_HEIGHT: usize = 17;
@@ -60,7 +60,7 @@ fn maze_test_controls(
 }
 
 fn spawn_maze(commands: &mut Commands, master_seed: u64, level: u32) {
-    let maze = rd_generate_maze(MAZE_WIDTH, MAZE_HEIGHT, master_seed, level);
+    let maze = old_rd_generate_maze(MAZE_WIDTH, MAZE_HEIGHT, master_seed, level);
     let maze_center_y = -24.0;
 
     for y in 0..maze.height() {
